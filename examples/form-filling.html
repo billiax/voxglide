@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice SDK - Form Filling Example</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    p.subtitle { color: #666; margin-bottom: 24px; }
+    form { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; }
+    .field { margin-bottom: 16px; }
+    label { display: block; font-weight: 500; margin-bottom: 4px; font-size: 14px; }
+    input, select, textarea {
+      width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px;
+      font-size: 14px; font-family: inherit;
+    }
+    textarea { resize: vertical; min-height: 80px; }
+    .log { background: #f3f4f6; border-radius: 8px; padding: 16px; font-family: monospace; font-size: 13px; max-height: 200px; overflow-y: auto; margin-top: 24px; }
+    .log-entry { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Voice SDK - Form Filling</h1>
+  <p class="subtitle">Click the mic and try: "Fill the name with John Smith", "Set email to john@example.com", "Select the premium plan"</p>
+
+  <form id="demo-form">
+    <div class="field">
+      <label for="name">Full Name</label>
+      <input type="text" id="name" name="name" placeholder="Enter your full name">
+    </div>
+
+    <div class="field">
+      <label for="email">Email Address</label>
+      <input type="email" id="email" name="email" placeholder="you@example.com">
+    </div>
+
+    <div class="field">
+      <label for="phone">Phone Number</label>
+      <input type="tel" id="phone" name="phone" placeholder="+1 (555) 000-0000">
+    </div>
+
+    <div class="field">
+      <label for="plan">Subscription Plan</label>
+      <select id="plan" name="plan">
+        <option value="">Select a plan</option>
+        <option value="free">Free</option>
+        <option value="starter">Starter ($9/mo)</option>
+        <option value="premium">Premium ($29/mo)</option>
+        <option value="enterprise">Enterprise ($99/mo)</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="notes">Additional Notes</label>
+      <textarea id="notes" name="notes" placeholder="Any additional information..."></textarea>
+    </div>
+  </form>
+
+  <div class="log" id="log"></div>
+
+  <script src="../dist/voice-sdk.iife.js"></script>
+  <script>
+    const log = document.getElementById('log');
+    function addLog(msg) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    const voice = new VoiceSDK({
+      apiKey: prompt('Enter your Gemini API key:') || '',
+      autoContext: true,
+      context: 'This is a registration form. Help the user fill it out via voice commands.',
+    });
+
+    voice.on('transcript', (e) => addLog(`${e.speaker}: ${e.text}`));
+    voice.on('action', (e) => addLog(`Action: ${e.name}(${JSON.stringify(e.args)})`));
+    voice.on('error', (e) => addLog(`Error: ${e.message}`));
+  </script>
+</body>
+</html>

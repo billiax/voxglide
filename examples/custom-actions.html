@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice SDK - Custom Actions Example</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    p.subtitle { color: #666; margin-bottom: 24px; }
+    .cart { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; }
+    .cart h2 { font-size: 18px; margin-bottom: 12px; }
+    .cart-items { list-style: none; padding: 0; }
+    .cart-items li { padding: 8px 0; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; }
+    .cart-items li:last-child { border-bottom: none; }
+    .total { font-weight: 700; font-size: 18px; margin-top: 12px; text-align: right; }
+    .log { background: #f3f4f6; border-radius: 8px; padding: 16px; font-family: monospace; font-size: 13px; max-height: 200px; overflow-y: auto; margin-top: 24px; }
+    .log-entry { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Voice SDK - Custom Actions</h1>
+  <p class="subtitle">Try: "Add a laptop to cart", "Remove headphones", "What's in my cart?"</p>
+
+  <div class="cart">
+    <h2>Shopping Cart</h2>
+    <ul class="cart-items" id="cart-items">
+      <li><span>Wireless Headphones</span><span>$79.99</span></li>
+      <li><span>USB-C Cable</span><span>$12.99</span></li>
+    </ul>
+    <div class="total" id="cart-total">Total: $92.98</div>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <script src="../dist/voice-sdk.iife.js"></script>
+  <script>
+    // Simple cart state
+    let cart = [
+      { name: 'Wireless Headphones', price: 79.99 },
+      { name: 'USB-C Cable', price: 12.99 },
+    ];
+
+    const catalog = {
+      'laptop': 999.99, 'wireless headphones': 79.99, 'usb-c cable': 12.99,
+      'mouse': 29.99, 'keyboard': 59.99, 'monitor': 349.99, 'webcam': 69.99,
+    };
+
+    function renderCart() {
+      const list = document.getElementById('cart-items');
+      const total = document.getElementById('cart-total');
+      list.innerHTML = cart.map(item =>
+        `<li><span>${item.name}</span><span>$${item.price.toFixed(2)}</span></li>`
+      ).join('');
+      const sum = cart.reduce((s, i) => s + i.price, 0);
+      total.textContent = `Total: $${sum.toFixed(2)}`;
+    }
+
+    const log = document.getElementById('log');
+    function addLog(msg) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    const voice = new VoiceSDK({
+      apiKey: prompt('Enter your Gemini API key:') || '',
+      autoContext: true,
+      context: `This is an e-commerce shopping cart page. Available products: ${Object.entries(catalog).map(([name, price]) => `${name} ($${price})`).join(', ')}`,
+      actions: {
+        custom: {
+          addToCart: {
+            declaration: {
+              name: 'addToCart',
+              description: 'Add a product to the shopping cart.',
+              parameters: {
+                type: 'OBJECT',
+                properties: {
+                  product: { type: 'STRING', description: 'Product name to add.' },
+                },
+                required: ['product'],
+              },
+            },
+            handler: async (args) => {
+              const name = String(args.product).toLowerCase();
+              const price = catalog[name];
+              if (!price) return { error: `Product "${args.product}" not found in catalog.` };
+              const displayName = name.split(' ').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+              cart.push({ name: displayName, price });
+              renderCart();
+              return { success: true, added: displayName, price };
+            },
+          },
+          removeFromCart: {
+            declaration: {
+              name: 'removeFromCart',
+              description: 'Remove a product from the shopping cart.',
+              parameters: {
+                type: 'OBJECT',
+                properties: {
+                  product: { type: 'STRING', description: 'Product name to remove.' },
+                },
+                required: ['product'],
+              },
+            },
+            handler: async (args) => {
+              const name = String(args.product).toLowerCase();
+              const idx = cart.findIndex(i => i.name.toLowerCase().includes(name));
+              if (idx === -1) return { error: `"${args.product}" not found in cart.` };
+              const removed = cart.splice(idx, 1)[0];
+              renderCart();
+              return { success: true, removed: removed.name };
+            },
+          },
+          getCartContents: {
+            declaration: {
+              name: 'getCartContents',
+              description: 'Get the current contents of the shopping cart.',
+              parameters: { type: 'OBJECT', properties: {}, required: [] },
+            },
+            handler: async () => {
+              const total = cart.reduce((s, i) => s + i.price, 0);
+              return { items: cart, total: total.toFixed(2), itemCount: cart.length };
+            },
+          },
+        },
+      },
+    });
+
+    voice.on('transcript', (e) => addLog(`${e.speaker}: ${e.text}`));
+    voice.on('action', (e) => addLog(`Action: ${e.name}(${JSON.stringify(e.args)}) → ${JSON.stringify(e.result)}`));
+    voice.on('error', (e) => addLog(`Error: ${e.message}`));
+  </script>
+</body>
+</html>
