@@ -159,4 +159,48 @@ export const SDK_STYLES = `
   .vsdk-transcript-line .speaker.ai {
     color: var(--vsdk-danger);
   }
+
+  /* Text input */
+  .vsdk-text-input-row {
+    display: flex;
+    gap: 4px;
+    margin-top: 8px;
+    border-top: 1px solid var(--vsdk-border);
+    padding-top: 8px;
+  }
+
+  .vsdk-text-input {
+    flex: 1;
+    border: 1px solid var(--vsdk-border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    background: var(--vsdk-bg);
+    color: var(--vsdk-text);
+  }
+
+  .vsdk-text-input:focus {
+    border-color: var(--vsdk-primary);
+  }
+
+  .vsdk-text-send {
+    pointer-events: auto;
+    border: none;
+    background: var(--vsdk-primary);
+    color: white;
+    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .vsdk-text-send:hover {
+    background: var(--vsdk-primary-hover);
+  }
 `;

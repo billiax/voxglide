@@ -47,7 +47,6 @@ export class NavigationHandler {
    */
   private saveSessionState(): void {
     const state: SessionState = {
-      apiKey: this.config.apiKey,
       config: {
         ...this.config,
         // Don't persist handler functions

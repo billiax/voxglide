@@ -34,8 +34,9 @@
     }
 
     const voice = new VoiceSDK({
-      apiKey: prompt('Enter your Gemini API key:') || '',
+      serverUrl: 'ws://localhost:3100',
       autoContext: true,
+      tts: true,
       context: 'This is a basic demo page for testing the Voice SDK.',
     });
 

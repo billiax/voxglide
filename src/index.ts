@@ -8,7 +8,6 @@ export type {
   ActionConfig,
   CustomAction,
   UIConfig,
-  VoiceConfig,
   ToolDeclaration,
   ToolParameter,
   ContextProvider,
@@ -22,12 +21,15 @@ export type {
   VoiceSDKEvents,
   FormFieldInfo,
   PageContext,
+  InteractiveElement,
+  ElementCapability,
 } from './types';
 
 // Sub-components (for advanced usage)
 export { ContextEngine } from './context/ContextEngine';
 export { TextProvider } from './context/TextProvider';
 export { PageContextProvider } from './context/PageContextProvider';
+export { InteractiveElementScanner } from './context/InteractiveElementScanner';
 export { ActionRouter } from './actions/ActionRouter';
 export { EventEmitter } from './events';
 export { ConnectionState } from './constants';

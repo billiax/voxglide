@@ -1,11 +1,12 @@
 import type { ContextProvider, ContextResult, FormFieldInfo, PageContext } from '../types';
 import { DEFAULT_AUTO_CONTEXT } from '../constants';
 import type { AutoContextConfig } from '../types';
+import { InteractiveElementScanner } from './InteractiveElementScanner';
 
 /**
  * Automatically scans the DOM to build AI context.
- * Extracts forms, headings, navigation, content, and meta tags.
- * Uses MutationObserver to mark context as dirty on DOM changes.
+ * Extracts forms, headings, navigation, content, interactive elements, and meta tags.
+ * Uses MutationObserver with fingerprint-based change detection.
  */
 export class PageContextProvider implements ContextProvider {
   type = 'page';
@@ -15,13 +16,26 @@ export class PageContextProvider implements ContextProvider {
   private cachedContext: PageContext | null = null;
   private dirty = true;
   private observer: MutationObserver | null = null;
+  private interactiveScanner: InteractiveElementScanner;
+  private lastFingerprint = '';
+  private onChangeCallback: (() => void) | null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(config: AutoContextConfig | true = true) {
+  constructor(config: AutoContextConfig | true = true, onChange?: () => void) {
     this.config = config === true
       ? { ...DEFAULT_AUTO_CONTEXT }
       : { ...DEFAULT_AUTO_CONTEXT, ...config };
 
+    this.interactiveScanner = new InteractiveElementScanner();
+    this.onChangeCallback = onChange || null;
     this.startObserving();
+  }
+
+  /**
+   * Mark the cached context as dirty, forcing a re-scan on next getContext().
+   */
+  markDirty(): void {
+    this.dirty = true;
   }
 
   private startObserving(): void {
@@ -35,6 +49,7 @@ export class PageContextProvider implements ContextProvider {
       );
       if (meaningful) {
         this.dirty = true;
+        this.debouncedFingerprintCheck();
       }
     });
 
@@ -44,6 +59,21 @@ export class PageContextProvider implements ContextProvider {
       attributes: true,
       attributeFilter: ['value', 'disabled', 'href'],
     });
+  }
+
+  private debouncedFingerprintCheck(): void {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+    }
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      const fingerprint = this.interactiveScanner.computeFingerprint();
+      if (fingerprint !== this.lastFingerprint) {
+        this.lastFingerprint = fingerprint;
+        this.dirty = true;
+        this.onChangeCallback?.();
+      }
+    }, 300);
   }
 
   async getContext(): Promise<ContextResult> {
@@ -69,6 +99,7 @@ export class PageContextProvider implements ContextProvider {
       headings: this.config.headings ? this.scanHeadings() : [],
       navigation: this.config.navigation ? this.scanNavigation() : [],
       content: this.config.content ? this.scanContent() : '',
+      interactiveElements: this.config.interactiveElements ? this.interactiveScanner.scan() : [],
     };
   }
 
@@ -226,6 +257,19 @@ export class PageContextProvider implements ContextProvider {
       ctx.navigation.forEach((n) => parts.push(`  - "${n.text}" → ${n.href}`));
     }
 
+    if (ctx.interactiveElements.length > 0) {
+      parts.push('\nInteractive Elements:');
+      ctx.interactiveElements.forEach((el) => {
+        const caps = el.capabilities.join(', ');
+        const stateStr = el.state
+          ? ' (' + Object.entries(el.state).map(([k, v]) => `${k}=${v}`).join(', ') + ')'
+          : '';
+        const tag = el.role || el.tagName;
+        const href = el.tagName === 'a' && el.selector ? '' : '';
+        parts.push(`  - [${tag}] "${el.description}"${href} — ${caps}${stateStr}`);
+      });
+    }
+
     if (ctx.content) {
       parts.push('\nPage Content (truncated):');
       parts.push(ctx.content);
@@ -235,6 +279,10 @@ export class PageContextProvider implements ContextProvider {
   }
 
   destroy(): void {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
     if (this.observer) {
       this.observer.disconnect();
       this.observer = null;

@@ -72,9 +72,20 @@ export const readContentTool: ToolDeclaration = {
   },
 };
 
+export const scanPageTool: ToolDeclaration = {
+  name: 'scanPage',
+  description: 'Rescan the current page to get fresh information about interactive elements, forms, and content. Use when you suspect the page has changed.',
+  parameters: {
+    type: 'OBJECT',
+    properties: {},
+    required: [],
+  },
+};
+
 export const builtInTools: ToolDeclaration[] = [
   fillFieldTool,
   clickElementTool,
   navigateToTool,
   readContentTool,
+  scanPageTool,
 ];

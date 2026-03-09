@@ -13,7 +13,7 @@ export class UIManager {
   private transcript: TranscriptOverlay | null = null;
   private config: Required<UIConfig>;
 
-  constructor(config: UIConfig = {}, onToggle: () => void) {
+  constructor(config: UIConfig = {}, onToggle: () => void, onSendText?: (text: string) => void) {
     this.config = { ...DEFAULT_UI, ...config };
 
     // Create Shadow DOM host
@@ -43,6 +43,9 @@ export class UIManager {
     // Create transcript overlay (before button so it appears above)
     if (this.config.showTranscript) {
       this.transcript = new TranscriptOverlay(this.wrapper, this.config.transcriptAutoHideMs);
+      if (onSendText) {
+        this.transcript.setSendTextHandler(onSendText);
+      }
     }
 
     // Create floating button

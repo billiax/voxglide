@@ -1,17 +1,12 @@
-export interface LiveSessionConfig {
-  apiKey: string;
-  model: string;
+export interface ProxySessionConfig {
+  serverUrl: string;
   systemInstruction: string;
   tools: unknown[];
-  voiceName: string;
   languageCode: string;
-  silenceDurationMs: number;
-  startSensitivity: string;
-  endSensitivity: string;
   debug: boolean;
 }
 
-export interface LiveSessionCallbacks {
+export interface ProxySessionCallbacks {
   onStatusChange: (status: string) => void;
   onTranscript: (text: string, speaker: 'user' | 'ai', isFinal: boolean) => void;
   onToolCall: (functionCall: { id: string; name: string; args: Record<string, unknown> }) => Promise<{ result: string }>;

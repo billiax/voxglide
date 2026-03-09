@@ -1,10 +1,8 @@
 // ── SDK Configuration ──
 
 export interface VoiceSDKConfig {
-  /** Gemini API key */
-  apiKey: string;
-  /** Gemini model ID */
-  model?: string;
+  /** VoxGlide proxy server WebSocket URL (e.g., ws://localhost:3100) */
+  serverUrl: string;
   /** Auto-scan the DOM for context (forms, headings, nav, content) */
   autoContext?: boolean | AutoContextConfig;
   /** Developer-supplied context string injected into the system prompt */
@@ -13,8 +11,10 @@ export interface VoiceSDKConfig {
   actions?: ActionConfig;
   /** UI configuration */
   ui?: UIConfig | false;
-  /** Voice configuration */
-  voice?: VoiceConfig;
+  /** Speech recognition language code (default: en-US) */
+  language?: string;
+  /** Enable browser TTS for AI responses */
+  tts?: boolean;
   /** Enable debug logging */
   debug?: boolean;
   /** Auto-reconnect after page navigation */
@@ -32,6 +32,8 @@ export interface AutoContextConfig {
   content?: boolean;
   /** Read page meta (title, description, OG tags) */
   meta?: boolean;
+  /** Scan for interactive elements (buttons, links, tabs, etc.) */
+  interactiveElements?: boolean;
   /** CSS selectors to exclude from scanning */
   exclude?: string[];
   /** Max characters for content scanning */
@@ -61,19 +63,6 @@ export interface UIConfig {
   showTranscript?: boolean;
   /** Auto-hide transcript after this many ms of inactivity */
   transcriptAutoHideMs?: number;
-}
-
-export interface VoiceConfig {
-  /** Gemini voice name */
-  voiceName?: string;
-  /** Language code */
-  languageCode?: string;
-  /** Silence detection duration in ms */
-  silenceDurationMs?: number;
-  /** Start of speech sensitivity */
-  startSensitivity?: 'START_SENSITIVITY_LOW' | 'START_SENSITIVITY_HIGH';
-  /** End of speech sensitivity */
-  endSensitivity?: 'END_SENSITIVITY_LOW' | 'END_SENSITIVITY_HIGH';
 }
 
 // ── Gemini Tool Declarations ──
@@ -167,10 +156,22 @@ export interface StateChangeEvent {
   to: string;
 }
 
+// ── Interactive Elements ──
+
+export interface InteractiveElement {
+  description: string;
+  selector: string;
+  tagName: string;
+  role?: string;
+  capabilities: ElementCapability[];
+  state?: Record<string, string>;
+}
+
+export type ElementCapability = 'clickable' | 'toggleable' | 'expandable' | 'editable' | 'draggable' | 'selectable' | 'navigable';
+
 // ── Internal ──
 
 export interface SessionState {
-  apiKey: string;
   config: VoiceSDKConfig;
   conversationSummary?: string;
 }
@@ -196,4 +197,5 @@ export interface PageContext {
   headings: { level: number; text: string }[];
   navigation: { text: string; href: string }[];
   content: string;
+  interactiveElements: InteractiveElement[];
 }

@@ -3,10 +3,8 @@ import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import terser from '@rollup/plugin-terser';
 
-const external = ['@google/genai'];
-
 export default [
-  // ESM build — @google/genai is external (peer dep)
+  // ESM build
   {
     input: 'src/index.ts',
     output: {
@@ -14,14 +12,13 @@ export default [
       format: 'esm',
       sourcemap: true,
     },
-    external,
     plugins: [
       resolve(),
       commonjs(),
       typescript({ tsconfig: './tsconfig.json', declaration: true, declarationDir: 'dist' }),
     ],
   },
-  // IIFE build — bundles everything for <script> tag usage
+  // IIFE build — for <script> tag usage
   {
     input: 'src/index.ts',
     output: {
@@ -29,7 +26,6 @@ export default [
       format: 'iife',
       name: 'VoiceSDKBundle',
       sourcemap: true,
-      // Expose VoiceSDK as a global
       footer: 'if(typeof window!=="undefined"){window.VoiceSDK=VoiceSDKBundle.VoiceSDK;}',
     },
     plugins: [

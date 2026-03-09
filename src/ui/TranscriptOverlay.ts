@@ -6,6 +6,8 @@ export class TranscriptOverlay {
   private hideTimeout: ReturnType<typeof setTimeout> | null = null;
   private lines: HTMLElement[] = [];
   private maxLines = 10;
+  private inputRow: HTMLElement | null = null;
+  private onSendText: ((text: string) => void) | null = null;
 
   constructor(parent: HTMLElement, autoHideMs: number) {
     this.autoHideMs = autoHideMs;
@@ -13,6 +15,39 @@ export class TranscriptOverlay {
     this.container = document.createElement('div');
     this.container.className = 'vsdk-transcript';
     parent.prepend(this.container);
+
+    // Text input row
+    this.inputRow = document.createElement('div');
+    this.inputRow.className = 'vsdk-text-input-row';
+
+    const input = document.createElement('input');
+    input.className = 'vsdk-text-input';
+    input.type = 'text';
+    input.placeholder = 'Type a message...';
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && input.value.trim()) {
+        this.onSendText?.(input.value.trim());
+        input.value = '';
+      }
+    });
+
+    const sendBtn = document.createElement('button');
+    sendBtn.className = 'vsdk-text-send';
+    sendBtn.textContent = '→';
+    sendBtn.addEventListener('click', () => {
+      if (input.value.trim()) {
+        this.onSendText?.(input.value.trim());
+        input.value = '';
+      }
+    });
+
+    this.inputRow.appendChild(input);
+    this.inputRow.appendChild(sendBtn);
+    this.container.appendChild(this.inputRow);
+  }
+
+  setSendTextHandler(handler: (text: string) => void): void {
+    this.onSendText = handler;
   }
 
   addTranscript(event: TranscriptEvent): void {

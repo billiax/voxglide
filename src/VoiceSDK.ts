@@ -1,5 +1,5 @@
 import { EventEmitter } from './events';
-import { LiveSession } from './ai/LiveSession';
+import { ProxySession } from './ai/ProxySession';
 import { ContextEngine } from './context/ContextEngine';
 import { TextProvider } from './context/TextProvider';
 import { PageContextProvider } from './context/PageContextProvider';
@@ -7,27 +7,29 @@ import { ActionRouter } from './actions/ActionRouter';
 import { NavigationHandler } from './actions/NavigationHandler';
 import { builtInTools } from './actions/tools';
 import { UIManager } from './ui/UIManager';
-import { ConnectionState, DEFAULT_MODEL, DEFAULT_VOICE, SYSTEM_PROMPT_TEMPLATE } from './constants';
+import { ConnectionState, DEFAULT_LANGUAGE, SYSTEM_PROMPT_TEMPLATE } from './constants';
 import type { ConnectionStateValue } from './constants';
 import type {
   VoiceSDKConfig, VoiceSDKEvents, ContextProvider, CustomAction,
   ToolDeclaration, TranscriptEvent, ActionEvent,
 } from './types';
-import type { LiveSessionConfig } from './ai/types';
+import type { ProxySessionConfig } from './ai/types';
 
 export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   private config: VoiceSDKConfig;
-  private liveSession: LiveSession | null = null;
+  private session: ProxySession | null = null;
   private contextEngine: ContextEngine;
   private actionRouter: ActionRouter;
   private pageContextProvider: PageContextProvider | null = null;
   private textProvider: TextProvider | null = null;
   private ui: UIManager | null = null;
   private connectionState: ConnectionStateValue = ConnectionState.DISCONNECTED;
+  private ttsEnabled: boolean;
 
   constructor(config: VoiceSDKConfig) {
     super();
     this.config = config;
+    this.ttsEnabled = config.tts ?? false;
 
     // Set up context engine
     this.contextEngine = new ContextEngine();
@@ -41,12 +43,17 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     // Auto page context
     if (config.autoContext !== false && config.autoContext !== undefined) {
       const autoConfig = config.autoContext === true ? true : config.autoContext;
-      this.pageContextProvider = new PageContextProvider(autoConfig);
+      this.pageContextProvider = new PageContextProvider(autoConfig, () => this.handleContextChange());
       this.contextEngine.addProvider(this.pageContextProvider);
     }
 
     // Set up action router
     this.actionRouter = new ActionRouter(config);
+
+    // Register scanPage handler
+    this.actionRouter.registerHandler('scanPage', async () => {
+      return this.handleScanPage();
+    });
 
     // Register custom actions
     if (config.actions?.custom) {
@@ -57,7 +64,8 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     if (config.ui !== false) {
       this.ui = new UIManager(
         typeof config.ui === 'object' ? config.ui : {},
-        () => this.toggle()
+        () => this.toggle(),
+        (text) => this.sendText(text),
       );
     }
 
@@ -65,14 +73,13 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     if (config.autoReconnect !== false) {
       const pending = NavigationHandler.getPendingReconnect();
       if (pending) {
-        // Auto-start after a brief delay to let the page settle
         setTimeout(() => this.start(), 500);
       }
     }
   }
 
   /**
-   * Start the voice session — connect to Gemini and begin listening.
+   * Start the voice session — connect to server and begin listening.
    */
   async start(): Promise<void> {
     if (this.connectionState === ConnectionState.CONNECTED || this.connectionState === ConnectionState.CONNECTING) {
@@ -95,22 +102,15 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         .replace('{developerContext}', this.config.context || 'None.')
         .replace('{toolDescriptions}', toolDescriptions || 'None.');
 
-      const voiceConfig = { ...DEFAULT_VOICE, ...this.config.voice };
-
-      const sessionConfig: LiveSessionConfig = {
-        apiKey: this.config.apiKey,
-        model: this.config.model || DEFAULT_MODEL,
+      const sessionConfig: ProxySessionConfig = {
+        serverUrl: this.config.serverUrl,
         systemInstruction,
         tools: [{ functionDeclarations: allTools }],
-        voiceName: voiceConfig.voiceName,
-        languageCode: voiceConfig.languageCode,
-        silenceDurationMs: voiceConfig.silenceDurationMs,
-        startSensitivity: voiceConfig.startSensitivity,
-        endSensitivity: voiceConfig.endSensitivity,
+        languageCode: this.config.language || DEFAULT_LANGUAGE,
         debug: this.config.debug ?? false,
       };
 
-      this.liveSession = new LiveSession(sessionConfig, {
+      this.session = new ProxySession(sessionConfig, {
         onStatusChange: (status) => {
           if (status === 'connected') {
             this.setConnectionState(ConnectionState.CONNECTED);
@@ -124,6 +124,11 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           const event: TranscriptEvent = { speaker, text, isFinal };
           this.emit('transcript', event);
           this.ui?.addTranscript(event);
+
+          // Speak AI responses if TTS is enabled
+          if (speaker === 'ai' && isFinal && this.ttsEnabled) {
+            this.speak(text);
+          }
         },
         onToolCall: async (fc) => {
           const actionEvent: ActionEvent = { name: fc.name, args: fc.args };
@@ -153,7 +158,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         },
       });
 
-      await this.liveSession.connect();
+      await this.session.connect();
     } catch (error: any) {
       this.setConnectionState(ConnectionState.ERROR);
       this.emit('error', { message: error.message });
@@ -164,9 +169,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
    * Stop the voice session.
    */
   async stop(): Promise<void> {
-    if (this.liveSession) {
-      await this.liveSession.disconnect();
-      this.liveSession = null;
+    if (this.session) {
+      await this.session.disconnect();
+      this.session = null;
     }
     this.setConnectionState(ConnectionState.DISCONNECTED);
     this.ui?.clearTranscript();
@@ -181,6 +186,17 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     } else if (this.connectionState === ConnectionState.DISCONNECTED || this.connectionState === ConnectionState.ERROR) {
       await this.start();
     }
+  }
+
+  /**
+   * Send text directly to the AI (text mode, useful for debugging without mic).
+   */
+  sendText(text: string): void {
+    if (!this.session || this.connectionState !== ConnectionState.CONNECTED) {
+      this.emit('error', { message: 'Not connected. Call start() first.' });
+      return;
+    }
+    this.session.sendText(text);
   }
 
   /**
@@ -220,6 +236,67 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   }
 
   /**
+   * Dump scan results for debugging. Returns the current page context.
+   */
+  async dumpScanResults(): Promise<string> {
+    const contextPrompt = await this.contextEngine.buildSystemPrompt();
+    if (this.config.debug) {
+      console.log('[VoiceSDK:scan] Dump results:', contextPrompt);
+    }
+    return contextPrompt;
+  }
+
+  /**
+   * Called when the PageContextProvider detects DOM changes via fingerprinting.
+   * Sends an updated context to the server mid-session.
+   */
+  private async handleContextChange(): Promise<void> {
+    if (!this.session || this.connectionState !== ConnectionState.CONNECTED) return;
+
+    if (this.config.debug) {
+      console.log('[VoiceSDK:context] DOM changed, sending context update to server');
+    }
+
+    try {
+      const contextPrompt = await this.contextEngine.buildSystemPrompt();
+      const contextTools = await this.contextEngine.getTools();
+      const allTools = this.buildToolDeclarations(contextTools);
+      const toolDescriptions = allTools.map((t) => `- ${t.name}: ${t.description}`).join('\n');
+
+      const systemInstruction = SYSTEM_PROMPT_TEMPLATE
+        .replace('{pageContext}', contextPrompt || 'No page context available.')
+        .replace('{developerContext}', this.config.context || 'None.')
+        .replace('{toolDescriptions}', toolDescriptions || 'None.');
+
+      this.session.sendContextUpdate(systemInstruction);
+    } catch (error: any) {
+      if (this.config.debug) {
+        console.log('[VoiceSDK:context] Failed to send context update:', error.message);
+      }
+    }
+  }
+
+  /**
+   * Handle the scanPage tool call — force a re-scan and return fresh context.
+   */
+  private async handleScanPage(): Promise<{ result: string }> {
+    if (this.config.debug) {
+      console.log('[VoiceSDK:scan] scanPage tool called, re-scanning');
+    }
+
+    if (this.pageContextProvider) {
+      this.pageContextProvider.markDirty();
+    }
+
+    try {
+      const contextPrompt = await this.contextEngine.buildSystemPrompt();
+      return { result: JSON.stringify({ success: true, context: contextPrompt }) };
+    } catch (error: any) {
+      return { result: JSON.stringify({ error: error.message }) };
+    }
+  }
+
+  /**
    * Destroy the SDK instance and clean up all resources.
    */
   async destroy(): Promise<void> {
@@ -235,6 +312,16 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
    */
   getConnectionState(): string {
     return this.connectionState;
+  }
+
+  /**
+   * Speak text using browser TTS.
+   */
+  private speak(text: string): void {
+    if (typeof speechSynthesis === 'undefined') return;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = this.config.language || DEFAULT_LANGUAGE;
+    speechSynthesis.speak(utterance);
   }
 
   private setConnectionState(state: typeof ConnectionState[keyof typeof ConnectionState]): void {
