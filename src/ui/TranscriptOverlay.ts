@@ -39,6 +39,10 @@ export class TranscriptOverlay {
     title.className = 'vsdk-panel-title';
     title.textContent = 'Assistant';
 
+    const testBadge = document.createElement('span');
+    testBadge.className = 'vsdk-test-badge';
+    testBadge.textContent = 'TEST';
+
     const closeBtn = document.createElement('button');
     closeBtn.className = 'vsdk-panel-close';
     closeBtn.innerHTML = '&times;';
@@ -48,6 +52,7 @@ export class TranscriptOverlay {
     });
 
     this.headerEl.appendChild(title);
+    this.headerEl.appendChild(testBadge);
     this.headerEl.appendChild(closeBtn);
     this.container.appendChild(this.headerEl);
 

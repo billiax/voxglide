@@ -262,6 +262,19 @@ export const SDK_STYLES = `
     color: var(--vsdk-text);
   }
 
+  .vsdk-test-badge {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #b45309;
+    background: #fef3c7;
+    border: 1px solid #fde68a;
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin-left: 6px;
+  }
+
   .vsdk-panel-close {
     pointer-events: auto;
     border: none;
