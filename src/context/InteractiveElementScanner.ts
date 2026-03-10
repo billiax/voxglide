@@ -8,6 +8,9 @@ import { INTERACTIVE_SELECTOR } from '../constants';
  */
 export class InteractiveElementScanner {
   private maxElements: number;
+  private wasTruncated = false;
+  private totalFound = 0;
+  private includedCount = 0;
 
   constructor(maxElements = 100) {
     this.maxElements = maxElements;
@@ -19,10 +22,9 @@ export class InteractiveElementScanner {
   scan(): InteractiveElement[] {
     const rawElements = document.querySelectorAll(INTERACTIVE_SELECTOR);
     const results: InteractiveElement[] = [];
+    let visibleCount = 0;
 
     for (const el of rawElements) {
-      if (results.length >= this.maxElements) break;
-
       const htmlEl = el as HTMLElement;
 
       // Skip hidden elements
@@ -40,6 +42,11 @@ export class InteractiveElementScanner {
       const description = this.generateDescription(htmlEl);
       if (!description) continue;
 
+      // Count all visible qualifying elements, even if we don't include them
+      visibleCount++;
+
+      if (results.length >= this.maxElements) continue;
+
       const selector = this.generateSelector(htmlEl);
       const role = htmlEl.getAttribute('role') || undefined;
       const state = this.captureState(htmlEl);
@@ -56,6 +63,11 @@ export class InteractiveElementScanner {
       });
     }
 
+    // Track truncation info
+    this.totalFound = visibleCount;
+    this.includedCount = results.length;
+    this.wasTruncated = visibleCount > results.length;
+
     // Sort: viewport elements first, then off-screen
     results.sort((a, b) => {
       if (a.inViewport && !b.inViewport) return -1;
@@ -64,6 +76,18 @@ export class InteractiveElementScanner {
     });
 
     return results;
+  }
+
+  /**
+   * Returns truncation info from the last scan, or null if no scan has been performed.
+   */
+  getTruncationInfo(): { wasTruncated: boolean; included: number; total: number } | null {
+    if (this.totalFound === 0 && this.includedCount === 0) return null;
+    return {
+      wasTruncated: this.wasTruncated,
+      included: this.includedCount,
+      total: this.totalFound,
+    };
   }
 
   /**
@@ -141,7 +165,7 @@ export class InteractiveElementScanner {
     // Editable
     if (
       tag === 'input' || tag === 'textarea' ||
-      el.getAttribute('contenteditable') === 'true' ||
+      (el.hasAttribute('contenteditable') && el.getAttribute('contenteditable') !== 'false') ||
       role === 'combobox'
     ) {
       caps.push('editable');
@@ -214,24 +238,37 @@ export class InteractiveElementScanner {
 
   /**
    * For controls without their own text (role=switch, checkbox, etc.),
-   * look at sibling elements and parent containers for label text.
+   * look at sibling elements (preceding and following) and parent containers for label text.
    */
   private findNearbyLabelText(el: HTMLElement): string {
     // Check preceding siblings for text
-    let sibling = el.previousElementSibling;
+    let sibling: Element | null = el.previousElementSibling;
     while (sibling) {
       const text = sibling.textContent?.trim();
       if (text && text.length < 80) return text;
       sibling = sibling.previousElementSibling;
     }
 
+    // Check following siblings for text
+    sibling = el.nextElementSibling;
+    while (sibling) {
+      const text = sibling.textContent?.trim();
+      if (text && text.length < 80) return text;
+      sibling = sibling.nextElementSibling;
+    }
+
     // Walk up to find a container with text that isn't just the element itself
     let parent = el.parentElement;
     for (let depth = 0; parent && depth < 3; depth++) {
-      // Look at siblings of the parent
+      // Look at siblings of the parent (both directions)
       const prevSibling = parent.previousElementSibling;
       if (prevSibling) {
         const text = prevSibling.textContent?.trim();
+        if (text && text.length < 80) return text;
+      }
+      const nextSibling = parent.nextElementSibling;
+      if (nextSibling) {
+        const text = nextSibling.textContent?.trim();
         if (text && text.length < 80) return text;
       }
       parent = parent.parentElement;

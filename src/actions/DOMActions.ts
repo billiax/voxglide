@@ -6,15 +6,16 @@ import { waitForElement } from './ElementWaiter';
 import { INTERACTIVE_SELECTOR } from '../constants';
 
 type FieldElement = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+type EditableElement = FieldElement | HTMLElement;
 
 // ── Element caches ──
 
 const fieldCache = new Map<string, HTMLElement>();
 const clickCache = new Map<string, HTMLElement>();
 
-function getCachedField(fieldId: string): FieldElement | null {
+function getCachedField(fieldId: string): EditableElement | null {
   const cached = fieldCache.get(fieldId);
-  if (cached?.isConnected) return cached as FieldElement;
+  if (cached?.isConnected) return cached as EditableElement;
   fieldCache.delete(fieldId);
   return null;
 }
@@ -32,20 +33,20 @@ export function invalidateElementCache(): void {
 }
 
 /**
- * Resolve a form field by cascading through: id → name → label text → placeholder → aria-label → combobox
+ * Resolve a form field by cascading through: id → name → label text → placeholder → aria-label → combobox → scored fuzzy
  */
-function resolveField(fieldId: string): FieldElement | null {
+function resolveField(fieldId: string): EditableElement | null {
   // Check cache first
   const cached = getCachedField(fieldId);
   if (cached) return cached;
 
   // 1. By ID
-  const byId = document.getElementById(fieldId) as FieldElement | null;
-  if (byId && isFieldElement(byId)) return cacheField(fieldId, byId);
+  const byId = document.getElementById(fieldId);
+  if (byId && isEditableElement(byId)) return cacheField(fieldId, byId);
 
   // 2. By name
-  const byName = document.querySelector(`[name="${fieldId}"]`) as FieldElement | null;
-  if (byName && isFieldElement(byName)) return cacheField(fieldId, byName);
+  const byName = document.querySelector(`[name="${fieldId}"]`);
+  if (byName && isEditableElement(byName)) return cacheField(fieldId, byName);
 
   // 3. By label text (case-insensitive)
   const labels = document.querySelectorAll('label');
@@ -53,21 +54,21 @@ function resolveField(fieldId: string): FieldElement | null {
     if (label.textContent?.trim().toLowerCase() === fieldId.toLowerCase()) {
       const forAttr = label.getAttribute('for');
       if (forAttr) {
-        const el = document.getElementById(forAttr) as FieldElement | null;
-        if (el && isFieldElement(el)) return cacheField(fieldId, el);
+        const el = document.getElementById(forAttr);
+        if (el && isEditableElement(el)) return cacheField(fieldId, el);
       }
       // Check nested field
-      const nested = label.querySelector('input, select, textarea') as FieldElement | null;
-      if (nested) return cacheField(fieldId, nested);
+      const nested = label.querySelector('input, select, textarea, [contenteditable]:not([contenteditable="false"])');
+      if (nested && isEditableElement(nested)) return cacheField(fieldId, nested);
     }
   }
 
   // 4. By placeholder (case-insensitive)
-  const allFields = document.querySelectorAll('input, select, textarea');
+  const allFields = document.querySelectorAll('input, select, textarea, [contenteditable]:not([contenteditable="false"])');
   for (const el of allFields) {
     const placeholder = (el as HTMLInputElement).placeholder;
     if (placeholder && placeholder.toLowerCase() === fieldId.toLowerCase()) {
-      return cacheField(fieldId, el as FieldElement);
+      return cacheField(fieldId, el as EditableElement);
     }
   }
 
@@ -75,7 +76,7 @@ function resolveField(fieldId: string): FieldElement | null {
   for (const el of allFields) {
     const ariaLabel = el.getAttribute('aria-label');
     if (ariaLabel && ariaLabel.toLowerCase() === fieldId.toLowerCase()) {
-      return cacheField(fieldId, el as FieldElement);
+      return cacheField(fieldId, el as EditableElement);
     }
   }
 
@@ -84,40 +85,141 @@ function resolveField(fieldId: string): FieldElement | null {
   for (const el of comboboxes) {
     const ariaLabel = el.getAttribute('aria-label');
     if (ariaLabel && ariaLabel.toLowerCase() === fieldId.toLowerCase()) {
-      return cacheField(fieldId, el as FieldElement);
+      return cacheField(fieldId, el as EditableElement);
     }
   }
 
-  // 7. Fuzzy: partial match on label, placeholder, or aria-label
-  const lower = fieldId.toLowerCase();
-  for (const label of labels) {
-    if (label.textContent?.trim().toLowerCase().includes(lower)) {
-      const forAttr = label.getAttribute('for');
-      if (forAttr) {
-        const el = document.getElementById(forAttr) as FieldElement | null;
-        if (el && isFieldElement(el)) return cacheField(fieldId, el);
-      }
-      const nested = label.querySelector('input, select, textarea') as FieldElement | null;
-      if (nested) return cacheField(fieldId, nested);
-    }
-  }
-
-  return null;
+  // 7. Scored fuzzy resolution
+  return scoredFuzzyResolve(fieldId);
 }
 
-function cacheField(fieldId: string, el: FieldElement): FieldElement {
+function cacheField(fieldId: string, el: EditableElement): EditableElement {
   fieldCache.set(fieldId, el);
   return el;
+}
+
+/**
+ * Scored fuzzy resolution: scores candidates against label text, placeholder,
+ * aria-label, and name attribute. Returns the best match or null.
+ *
+ * Scoring: exact=100, starts-with=80, word-boundary=60, contains=40.
+ * On tie, prefer visible/enabled elements.
+ */
+function scoredFuzzyResolve(fieldId: string): EditableElement | null {
+  const lower = fieldId.toLowerCase();
+
+  interface ScoredCandidate {
+    el: EditableElement;
+    score: number;
+    visible: boolean;
+    enabled: boolean;
+  }
+
+  function scoreText(text: string | null | undefined): number {
+    if (!text) return 0;
+    const t = text.trim().toLowerCase();
+    if (!t) return 0;
+    if (t === lower) return 100;
+    if (t.startsWith(lower)) return 80;
+    // Word boundary: check if fieldId appears after a word boundary
+    const wordBoundaryPattern = new RegExp(`\\b${lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
+    if (wordBoundaryPattern.test(t)) return 60;
+    if (t.includes(lower)) return 40;
+    return 0;
+  }
+
+  const candidates: ScoredCandidate[] = [];
+
+  // Score label-associated fields
+  const labels = document.querySelectorAll('label');
+  for (const label of labels) {
+    const labelScore = scoreText(label.textContent);
+    if (labelScore === 0) continue;
+
+    const forAttr = label.getAttribute('for');
+    if (forAttr) {
+      const el = document.getElementById(forAttr);
+      if (el && isEditableElement(el)) {
+        const htmlEl = el as HTMLElement;
+        candidates.push({
+          el,
+          score: labelScore,
+          visible: htmlEl.offsetParent !== null,
+          enabled: !(el as HTMLInputElement).disabled,
+        });
+      }
+    }
+    const nested = label.querySelector('input, select, textarea, [contenteditable]:not([contenteditable="false"])');
+    if (nested && isEditableElement(nested)) {
+      const htmlEl = nested as HTMLElement;
+      candidates.push({
+        el: nested,
+        score: labelScore,
+        visible: htmlEl.offsetParent !== null,
+        enabled: !(nested as HTMLInputElement).disabled,
+      });
+    }
+  }
+
+  // Score all editable fields by placeholder, aria-label, name
+  const allFields = document.querySelectorAll('input, select, textarea, [contenteditable]:not([contenteditable="false"])');
+  for (const el of allFields) {
+    if (!isEditableElement(el)) continue;
+
+    const placeholderScore = scoreText((el as HTMLInputElement).placeholder);
+    const ariaScore = scoreText(el.getAttribute('aria-label'));
+    const nameScore = scoreText(el.getAttribute('name'));
+    const bestScore = Math.max(placeholderScore, ariaScore, nameScore);
+
+    if (bestScore > 0) {
+      const htmlEl = el as HTMLElement;
+      candidates.push({
+        el,
+        score: bestScore,
+        visible: htmlEl.offsetParent !== null,
+        enabled: !(el as HTMLInputElement).disabled,
+      });
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Sort by score descending, then prefer visible+enabled on tie
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    // On tie: prefer visible and enabled
+    const aRank = (a.visible ? 2 : 0) + (a.enabled ? 1 : 0);
+    const bRank = (b.visible ? 2 : 0) + (b.enabled ? 1 : 0);
+    return bRank - aRank;
+  });
+
+  return cacheField(fieldId, candidates[0].el);
 }
 
 function isFieldElement(el: Element): el is FieldElement {
   return el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement;
 }
 
+function isEditableElement(el: Element): el is EditableElement {
+  return isFieldElement(el) || (el.hasAttribute('contenteditable') && el.getAttribute('contenteditable') !== 'false');
+}
+
+function isContentEditable(el: Element): boolean {
+  return el.hasAttribute('contenteditable') && el.getAttribute('contenteditable') !== 'false';
+}
+
 /**
  * Set a field value and dispatch change events so frameworks detect the update.
  */
-function setFieldValue(el: FieldElement, value: string): void {
+function setFieldValue(el: EditableElement, value: string): void {
+  // Handle contenteditable elements
+  if (isContentEditable(el) && !isFieldElement(el)) {
+    (el as HTMLElement).textContent = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return;
+  }
+
   if (el instanceof HTMLSelectElement) {
     // Find matching option by text or value
     const option = Array.from(el.options).find(
@@ -139,7 +241,7 @@ function setFieldValue(el: FieldElement, value: string): void {
     if (nativeInputValueSetter) {
       nativeInputValueSetter.call(el, value);
     } else {
-      el.value = value;
+      (el as HTMLInputElement | HTMLTextAreaElement).value = value;
     }
   }
 
@@ -240,14 +342,23 @@ function resolveClickTarget(description: string, selector?: string): HTMLElement
 
 /**
  * Find label text from sibling/parent elements for controls without their own text.
+ * Searches both preceding and following siblings.
  */
 function getNearbyLabelText(el: HTMLElement): string {
   // Check preceding siblings
-  let sibling = el.previousElementSibling;
+  let sibling: Element | null = el.previousElementSibling;
   while (sibling) {
     const text = sibling.textContent?.trim().toLowerCase();
     if (text && text.length < 100) return text;
     sibling = sibling.previousElementSibling;
+  }
+
+  // Check following siblings
+  sibling = el.nextElementSibling;
+  while (sibling) {
+    const text = sibling.textContent?.trim().toLowerCase();
+    if (text && text.length < 100) return text;
+    sibling = sibling.nextElementSibling;
   }
 
   // Walk up to parent containers and check their text/siblings
@@ -256,6 +367,11 @@ function getNearbyLabelText(el: HTMLElement): string {
     const prevSibling = parent.previousElementSibling;
     if (prevSibling) {
       const text = prevSibling.textContent?.trim().toLowerCase();
+      if (text && text.length < 100) return text;
+    }
+    const nextSibling = parent.nextElementSibling;
+    if (nextSibling) {
+      const text = nextSibling.textContent?.trim().toLowerCase();
       if (text && text.length < 100) return text;
     }
     parent = parent.parentElement;
@@ -288,7 +404,7 @@ export async function fillField(args: Record<string, unknown>): Promise<{ result
     return { result: JSON.stringify({ error: 'Cannot fill password fields' }) };
   }
 
-  if (el.disabled) {
+  if ((el as HTMLInputElement).disabled) {
     return { result: JSON.stringify({ error: `Field "${fieldId}" is disabled` }) };
   }
 
@@ -300,7 +416,7 @@ export async function fillField(args: Record<string, unknown>): Promise<{ result
     if (filled) {
       return { result: JSON.stringify({ success: true, field: fieldId, value }) };
     }
-    // Fall through to regular fill if combobox selection failed
+    return { result: JSON.stringify({ error: `Could not select "${value}" from combobox "${fieldId}".` }) };
   }
 
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

@@ -293,6 +293,11 @@ export class PageContextProvider implements ContextProvider {
         const tag = el.role || el.tagName;
         elLines.push(`  - [${tag}] "${el.description}" \u2014 ${caps}${stateStr}`);
       });
+      // Add truncation notice if scanner had to limit results
+      const truncInfo = this.interactiveScanner.getTruncationInfo();
+      if (truncInfo?.wasTruncated) {
+        elLines.push(`(Showing ${truncInfo.included} of ${truncInfo.total} interactive elements. Use scanPage to re-scan.)`);
+      }
       sections.push({ name: 'interactive', content: elLines.join('\n'), priority: 8 });
     }
 

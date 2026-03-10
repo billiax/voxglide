@@ -37,7 +37,7 @@ export const INTERACTIVE_SELECTOR = [
   '[role="option"]',
   '[role="link"]',
   '[tabindex]:not([tabindex="-1"])',
-  '[contenteditable="true"]',
+  '[contenteditable]:not([contenteditable="false"])',
   'details > summary',
   '[draggable="true"]',
   '[onclick]',
