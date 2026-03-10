@@ -4,6 +4,8 @@ export interface ProxySessionConfig {
   tools: unknown[];
   languageCode: string;
   debug: boolean;
+  sessionId?: string;
+  speechEnabled: boolean;
 }
 
 export interface ProxySessionCallbacks {

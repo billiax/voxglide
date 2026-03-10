@@ -203,4 +203,46 @@ export const SDK_STYLES = `
   .vsdk-text-send:hover {
     background: var(--vsdk-primary-hover);
   }
+
+  /* Text-first mode */
+  .vsdk-transcript.text-mode {
+    min-width: 300px;
+    max-height: 350px;
+  }
+
+  .vsdk-transcript.text-mode .vsdk-text-input {
+    font-size: 14px;
+    padding: 10px 12px;
+  }
+
+  /* Tool execution status */
+  .vsdk-tool-status {
+    font-size: 12px;
+    color: var(--vsdk-text-muted);
+    padding: 4px 0;
+    font-style: italic;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .vsdk-tool-status::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--vsdk-primary);
+    animation: vsdk-pulse 1s ease-in-out infinite;
+  }
+
+  .vsdk-tool-status.completed::before {
+    background: #3fb950;
+    animation: none;
+  }
+
+  .vsdk-tool-status.failed::before {
+    background: var(--vsdk-danger);
+    animation: none;
+  }
 `;

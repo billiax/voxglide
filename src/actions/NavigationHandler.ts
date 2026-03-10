@@ -8,10 +8,15 @@ import type { SessionState, VoiceSDKConfig } from '../types';
 export class NavigationHandler {
   private config: VoiceSDKConfig;
   private allowCrossOrigin: boolean;
+  private sessionId: string | null = null;
 
   constructor(config: VoiceSDKConfig) {
     this.config = config;
     this.allowCrossOrigin = config.actions?.allowCrossOrigin ?? false;
+  }
+
+  setSessionId(id: string): void {
+    this.sessionId = id;
   }
 
   async navigateTo(args: Record<string, unknown>): Promise<{ result: string }> {
@@ -54,6 +59,7 @@ export class NavigationHandler {
           allowCrossOrigin: this.config.actions.allowCrossOrigin,
         } : undefined,
       },
+      sessionId: this.sessionId || undefined,
     };
 
     try {
