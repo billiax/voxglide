@@ -20,6 +20,8 @@ vi.mock('../../src/ai/ProxySession', () => {
     connect = mockConnect;
     disconnect = mockDisconnect;
     isConnected = mockIsConnected;
+    pauseSpeech = vi.fn();
+    resumeSpeech = vi.fn();
     constructor(public config: any, public callbacks: any) {
       proxySessionInstances.push({ config, callbacks });
     }
@@ -32,7 +34,13 @@ vi.mock('../../src/ui/UIManager', () => {
     setConnectionState = vi.fn();
     addTranscript = vi.fn();
     clearTranscript = vi.fn();
+    showTranscript = vi.fn();
+    hideTranscript = vi.fn();
+    setAutoHideEnabled = vi.fn();
     destroy = vi.fn();
+    setAIThinking = vi.fn();
+    restoreTranscript = vi.fn();
+    setDisconnectHandler = vi.fn();
     constructor(public config: any, public onToggle: any) {}
   }
   return { UIManager: MockUIManager };
@@ -53,6 +61,7 @@ vi.mock('../../src/actions/NavigationHandler', () => {
     navigateTo = vi.fn().mockResolvedValue({ result: 'ok' });
     static getPendingReconnect = mockGetPendingReconnect;
     static clearPendingReconnect = mockClearPendingReconnect;
+    static consumePendingReconnect = vi.fn();
   }
   return { NavigationHandler: MockNavigationHandler };
 });
@@ -61,6 +70,7 @@ vi.mock('../../src/actions/DOMActions', () => ({
   fillField: vi.fn().mockResolvedValue({ result: 'ok' }),
   clickElement: vi.fn().mockResolvedValue({ result: 'ok' }),
   readContent: vi.fn().mockResolvedValue({ result: 'ok' }),
+  invalidateElementCache: vi.fn(),
 }));
 
 import { ContextEngine } from '../../src/context/ContextEngine';
@@ -223,9 +233,10 @@ describe('VoiceSDK', () => {
       expect((sdk as any).session).toBeNull();
     });
 
-    it('clears transcript on UI', async () => {
+    it('keeps transcript visible on stop (auto-hide handles fade)', async () => {
       await sdk.stop();
-      expect((sdk as any).ui.clearTranscript).toHaveBeenCalled();
+      // stop() no longer clears transcript — it stays visible and auto-hides
+      expect((sdk as any).ui.clearTranscript).not.toHaveBeenCalled();
     });
 
     it('is safe to call when already stopped', async () => {

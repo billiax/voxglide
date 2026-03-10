@@ -7,6 +7,7 @@ export class SpeechCapture {
   private onResult: ((text: string, isFinal: boolean) => void) | null = null;
   private onStatusChange: ((listening: boolean) => void) | null = null;
   private running = false;
+  private paused = false;
   private language: string;
 
   constructor(language = 'en-US') {
@@ -46,14 +47,14 @@ export class SpeechCapture {
     };
 
     this.recognition.onend = () => {
-      // Auto-restart if we're still supposed to be running
-      if (this.running && this.recognition) {
+      // Auto-restart if we're still supposed to be running (and not paused for TTS)
+      if (this.running && !this.paused && this.recognition) {
         try {
           this.recognition.start();
         } catch {
           // Already started or destroyed
         }
-      } else {
+      } else if (!this.running) {
         this.onStatusChange?.(false);
       }
     };
@@ -71,6 +72,7 @@ export class SpeechCapture {
 
   stop(): void {
     this.running = false;
+    this.paused = false;
     if (this.recognition) {
       this.recognition.onend = null;
       this.recognition.onresult = null;
@@ -87,7 +89,42 @@ export class SpeechCapture {
     this.onStatusChange = null;
   }
 
+  /**
+   * Pause recognition (e.g. while TTS is playing to avoid feedback loop).
+   * The recognition instance is kept alive — it just stops listening.
+   */
+  pause(): void {
+    if (!this.running || this.paused) return;
+    this.paused = true;
+    if (this.recognition) {
+      try {
+        this.recognition.stop();
+      } catch {
+        // Already stopped
+      }
+    }
+  }
+
+  /**
+   * Resume recognition after a pause.
+   */
+  resume(): void {
+    if (!this.running || !this.paused) return;
+    this.paused = false;
+    if (this.recognition) {
+      try {
+        this.recognition.start();
+      } catch {
+        // Already started
+      }
+    }
+  }
+
   isRunning(): boolean {
     return this.running;
+  }
+
+  isPaused(): boolean {
+    return this.paused;
   }
 }

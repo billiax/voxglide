@@ -47,6 +47,11 @@ Object.defineProperty(navigator, 'mediaDevices', {
   writable: true,
 });
 
+// Mock scrollIntoView (not available in jsdom)
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = vi.fn();
+}
+
 // Mock MutationObserver (jsdom has limited support)
 if (typeof MutationObserver === 'undefined') {
   (globalThis as any).MutationObserver = class {

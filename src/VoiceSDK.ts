@@ -5,6 +5,7 @@ import { TextProvider } from './context/TextProvider';
 import { PageContextProvider } from './context/PageContextProvider';
 import { ActionRouter } from './actions/ActionRouter';
 import { NavigationHandler } from './actions/NavigationHandler';
+import { invalidateElementCache } from './actions/DOMActions';
 import { builtInTools } from './actions/tools';
 import { UIManager } from './ui/UIManager';
 import { ConnectionState, DEFAULT_LANGUAGE, SYSTEM_PROMPT_TEMPLATE } from './constants';
@@ -14,6 +15,7 @@ import type {
   ToolDeclaration, TranscriptEvent, ActionEvent,
 } from './types';
 import type { ProxySessionConfig } from './ai/types';
+import type { InputMode } from './ui/FloatingButton';
 
 export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   private config: VoiceSDKConfig;
@@ -25,11 +27,14 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   private ui: UIManager | null = null;
   private connectionState: ConnectionStateValue = ConnectionState.DISCONNECTED;
   private ttsEnabled: boolean;
+  private resolvedInputMode: InputMode;
+  private toggling = false;
 
   constructor(config: VoiceSDKConfig) {
     super();
     this.config = config;
     this.ttsEnabled = config.tts ?? false;
+    this.resolvedInputMode = this.resolveInputMode();
 
     // Set up context engine
     this.contextEngine = new ContextEngine();
@@ -66,16 +71,37 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         typeof config.ui === 'object' ? config.ui : {},
         () => this.toggle(),
         (text) => this.sendText(text),
+        this.resolvedInputMode,
       );
+    }
+
+    // Wire disconnect handler from panel header
+    if (this.ui) {
+      this.ui.setDisconnectHandler(() => this.stop());
     }
 
     // Check for pending reconnect from navigation
     if (config.autoReconnect !== false) {
       const pending = NavigationHandler.getPendingReconnect();
       if (pending) {
+        // Restore transcript from previous page
+        this.ui?.restoreTranscript();
         setTimeout(() => this.start(), 500);
       }
     }
+  }
+
+  /**
+   * Resolve the effective input mode based on config and browser capabilities.
+   */
+  private resolveInputMode(): InputMode {
+    const mode = this.config.mode ?? 'voice';
+    if (mode === 'text') return 'text';
+    if (mode === 'auto') {
+      return ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
+        ? 'voice' : 'text';
+    }
+    return 'voice';
   }
 
   /**
@@ -89,6 +115,13 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     this.setConnectionState(ConnectionState.CONNECTING);
 
     try {
+      // Check for stored sessionId from navigation reconnect
+      let storedSessionId: string | undefined;
+      const pending = NavigationHandler.getPendingReconnect();
+      if (pending?.sessionId) {
+        storedSessionId = pending.sessionId;
+      }
+
       // Build context and system prompt
       const contextPrompt = await this.contextEngine.buildSystemPrompt();
       const contextTools = await this.contextEngine.getTools();
@@ -108,6 +141,8 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         tools: [{ functionDeclarations: allTools }],
         languageCode: this.config.language || DEFAULT_LANGUAGE,
         debug: this.config.debug ?? false,
+        sessionId: storedSessionId,
+        speechEnabled: this.resolvedInputMode === 'voice',
       };
 
       this.session = new ProxySession(sessionConfig, {
@@ -115,7 +150,20 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           if (status === 'connected') {
             this.setConnectionState(ConnectionState.CONNECTED);
             this.emit('connected');
+            // Show transcript panel immediately so user can see input + type
+            this.ui?.setAutoHideEnabled(false);
+            this.ui?.showTranscript();
+            // Store sessionId for navigation handler
+            if (this.session?.sessionId) {
+              this.actionRouter.setNavigationSessionId(this.session.sessionId);
+            }
+            // Clear pending reconnect now that we've successfully connected
+            NavigationHandler.consumePendingReconnect();
           } else if (status === 'disconnected') {
+            // Ignore stale disconnect if already disconnected (e.g. from old WS onclose)
+            if (this.connectionState === ConnectionState.DISCONNECTED) return;
+            // Re-enable auto-hide so transcript fades out naturally
+            this.ui?.setAutoHideEnabled(true);
             this.setConnectionState(ConnectionState.DISCONNECTED);
             this.emit('disconnected');
           }
@@ -124,6 +172,13 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           const event: TranscriptEvent = { speaker, text, isFinal };
           this.emit('transcript', event);
           this.ui?.addTranscript(event);
+
+          // Show/hide AI thinking indicator
+          if (speaker === 'user' && isFinal) {
+            this.ui?.setAIThinking(true);
+          } else if (speaker === 'ai' && isFinal) {
+            this.ui?.setAIThinking(false);
+          }
 
           // Speak AI responses if TTS is enabled
           if (speaker === 'ai' && isFinal && this.ttsEnabled) {
@@ -134,7 +189,16 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           const actionEvent: ActionEvent = { name: fc.name, args: fc.args };
           this.emit('action:before', actionEvent);
 
+          // AI responded with action — no longer "thinking"
+          this.ui?.setAIThinking(false);
+
+          // Show tool status in UI
+          this.ui?.showToolStatus(fc.name);
+
           const result = await this.actionRouter.route(fc);
+
+          // Remove tool status from UI
+          this.ui?.removeToolStatus();
 
           actionEvent.result = result;
           this.emit('action', actionEvent);
@@ -167,24 +231,46 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
 
   /**
    * Stop the voice session.
+   * Keeps transcript visible briefly (auto-hide takes over) so user can see the last conversation.
    */
   async stop(): Promise<void> {
+    this.cancelTTS();
     if (this.session) {
       await this.session.disconnect();
       this.session = null;
     }
-    this.setConnectionState(ConnectionState.DISCONNECTED);
-    this.ui?.clearTranscript();
+    // Note: setConnectionState is NOT called here because session.disconnect()
+    // triggers the onStatusChange('disconnected') callback which handles it.
+    // Only set it if the callback didn't fire (e.g. no session existed).
+    if (this.connectionState !== ConnectionState.DISCONNECTED) {
+      this.setConnectionState(ConnectionState.DISCONNECTED);
+    }
   }
 
   /**
    * Toggle start/stop.
+   * In text mode while connected: toggle panel visibility.
+   * In voice mode while connected: disconnect session.
+   * While disconnected/error: connect.
    */
   async toggle(): Promise<void> {
-    if (this.connectionState === ConnectionState.CONNECTED) {
-      await this.stop();
-    } else if (this.connectionState === ConnectionState.DISCONNECTED || this.connectionState === ConnectionState.ERROR) {
-      await this.start();
+    // Guard against concurrent toggle calls (double-clicks, etc.)
+    if (this.toggling) return;
+
+    if (this.resolvedInputMode === 'text' && this.connectionState === ConnectionState.CONNECTED) {
+      this.ui?.toggleTranscript();
+      return;
+    }
+
+    this.toggling = true;
+    try {
+      if (this.connectionState === ConnectionState.CONNECTED) {
+        await this.stop();
+      } else if (this.connectionState === ConnectionState.DISCONNECTED || this.connectionState === ConnectionState.ERROR) {
+        await this.start();
+      }
+    } finally {
+      this.toggling = false;
     }
   }
 
@@ -253,6 +339,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   private async handleContextChange(): Promise<void> {
     if (!this.session || this.connectionState !== ConnectionState.CONNECTED) return;
 
+    // Invalidate element lookup caches when DOM changes
+    invalidateElementCache();
+
     if (this.config.debug) {
       console.log('[VoiceSDK:context] DOM changed, sending context update to server');
     }
@@ -284,6 +373,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
       console.log('[VoiceSDK:scan] scanPage tool called, re-scanning');
     }
 
+    // Invalidate element caches before re-scanning
+    invalidateElementCache();
+
     if (this.pageContextProvider) {
       this.pageContextProvider.markDirty();
     }
@@ -300,7 +392,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
    * Destroy the SDK instance and clean up all resources.
    */
   async destroy(): Promise<void> {
+    this.cancelTTS();
     await this.stop();
+    this.ui?.clearTranscript();
     this.pageContextProvider?.destroy();
     this.ui?.destroy();
     this.removeAllListeners();
@@ -316,12 +410,35 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
 
   /**
    * Speak text using browser TTS.
+   * Pauses speech recognition during playback to prevent feedback loop.
    */
   private speak(text: string): void {
     if (typeof speechSynthesis === 'undefined') return;
+
+    // Pause mic to prevent TTS audio being picked up as user speech
+    this.session?.pauseSpeech();
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = this.config.language || DEFAULT_LANGUAGE;
+
+    utterance.onend = () => {
+      this.session?.resumeSpeech();
+    };
+
+    utterance.onerror = () => {
+      this.session?.resumeSpeech();
+    };
+
     speechSynthesis.speak(utterance);
+  }
+
+  /**
+   * Cancel any in-progress or queued TTS playback.
+   */
+  private cancelTTS(): void {
+    if (typeof speechSynthesis !== 'undefined') {
+      speechSynthesis.cancel();
+    }
   }
 
   private setConnectionState(state: typeof ConnectionState[keyof typeof ConnectionState]): void {

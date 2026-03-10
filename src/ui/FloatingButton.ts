@@ -1,53 +1,74 @@
-import { micIcon, micOffIcon, loaderIcon } from './icons';
-import type { ConnectionStateValue } from '../constants';
+import { micIcon, micOffIcon, loaderIcon, chatIcon, closeIcon } from './icons';
 import { ConnectionState } from '../constants';
+import type { UIState } from './UIStateMachine';
 
 export type ButtonClickHandler = () => void;
+export type InputMode = 'voice' | 'text';
 
 export class FloatingButton {
   private button: HTMLButtonElement;
-  private state: ConnectionStateValue = ConnectionState.DISCONNECTED;
   private onClick: ButtonClickHandler;
 
-  constructor(parent: HTMLElement, onClick: ButtonClickHandler) {
+  constructor(parent: HTMLElement, onClick: ButtonClickHandler, inputMode: InputMode = 'voice') {
     this.onClick = onClick;
 
     this.button = document.createElement('button');
     this.button.className = 'vsdk-btn';
-    this.button.setAttribute('aria-label', 'Voice assistant');
-    this.button.innerHTML = micIcon;
+    this.button.setAttribute('aria-label', inputMode === 'text' ? 'Open chat' : 'Voice assistant');
+    this.button.innerHTML = inputMode === 'text' ? chatIcon : micIcon;
     this.button.addEventListener('click', () => this.onClick());
     parent.appendChild(this.button);
   }
 
-  setState(state: ConnectionStateValue): void {
-    this.state = state;
-
+  render(state: Readonly<UIState>): void {
     // Remove all state classes
     this.button.classList.remove('listening', 'connecting');
 
-    switch (state) {
-      case ConnectionState.CONNECTED:
-        this.button.classList.add('listening');
-        this.button.innerHTML = micOffIcon;
-        this.button.setAttribute('aria-label', 'Stop voice assistant');
-        break;
-      case ConnectionState.CONNECTING:
-        this.button.classList.add('connecting');
-        this.button.innerHTML = loaderIcon;
-        this.button.setAttribute('aria-label', 'Connecting...');
-        break;
-      case ConnectionState.DISCONNECTED:
-      case ConnectionState.ERROR:
-      default:
-        this.button.innerHTML = micIcon;
-        this.button.setAttribute('aria-label', 'Start voice assistant');
-        break;
+    if (state.inputMode === 'text') {
+      // Text mode
+      switch (state.connection) {
+        case ConnectionState.CONNECTED:
+          this.button.classList.add('listening');
+          // Show close icon when panel is visible, chat icon when hidden
+          if (state.panelVisible) {
+            this.button.innerHTML = closeIcon;
+            this.button.setAttribute('aria-label', 'Close chat');
+          } else {
+            this.button.innerHTML = chatIcon;
+            this.button.setAttribute('aria-label', 'Open chat');
+          }
+          break;
+        case ConnectionState.CONNECTING:
+          this.button.classList.add('connecting');
+          this.button.innerHTML = loaderIcon;
+          this.button.setAttribute('aria-label', 'Connecting...');
+          break;
+        default:
+          this.button.innerHTML = chatIcon;
+          this.button.setAttribute('aria-label', 'Open chat');
+          break;
+      }
+    } else {
+      // Voice mode: mic icons
+      switch (state.connection) {
+        case ConnectionState.CONNECTED:
+          this.button.classList.add('listening');
+          this.button.innerHTML = micOffIcon;
+          this.button.setAttribute('aria-label', 'Stop voice assistant');
+          break;
+        case ConnectionState.CONNECTING:
+          this.button.classList.add('connecting');
+          this.button.innerHTML = loaderIcon;
+          this.button.setAttribute('aria-label', 'Connecting...');
+          break;
+        case ConnectionState.DISCONNECTED:
+        case ConnectionState.ERROR:
+        default:
+          this.button.innerHTML = micIcon;
+          this.button.setAttribute('aria-label', 'Start voice assistant');
+          break;
+      }
     }
-  }
-
-  getState(): ConnectionStateValue {
-    return this.state;
   }
 
   destroy(): void {

@@ -24,6 +24,13 @@ export class ActionRouter {
     this.handlers.set('navigateTo', (args) => this.navigationHandler.navigateTo(args));
   }
 
+  /**
+   * Pass the server-assigned sessionId to the navigation handler for reconnect persistence.
+   */
+  setNavigationSessionId(sessionId: string): void {
+    this.navigationHandler.setSessionId(sessionId);
+  }
+
   registerHandler(toolName: string, handler: ActionHandler): void {
     this.handlers.set(toolName, handler);
   }

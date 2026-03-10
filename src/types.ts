@@ -19,6 +19,8 @@ export interface VoiceSDKConfig {
   debug?: boolean;
   /** Auto-reconnect after page navigation */
   autoReconnect?: boolean;
+  /** Input mode: 'voice' (default), 'text' (no mic), or 'auto' (fallback to text) */
+  mode?: 'voice' | 'text' | 'auto';
 }
 
 export interface AutoContextConfig {
@@ -38,6 +40,8 @@ export interface AutoContextConfig {
   exclude?: string[];
   /** Max characters for content scanning */
   maxContentLength?: number;
+  /** Max tokens for context output (default: 4000) */
+  maxContextTokens?: number;
 }
 
 export interface ActionConfig {
@@ -165,6 +169,7 @@ export interface InteractiveElement {
   role?: string;
   capabilities: ElementCapability[];
   state?: Record<string, string>;
+  inViewport?: boolean;
 }
 
 export type ElementCapability = 'clickable' | 'toggleable' | 'expandable' | 'editable' | 'draggable' | 'selectable' | 'navigable';
@@ -174,6 +179,7 @@ export type ElementCapability = 'clickable' | 'toggleable' | 'expandable' | 'edi
 export interface SessionState {
   config: VoiceSDKConfig;
   conversationSummary?: string;
+  sessionId?: string;
 }
 
 export interface FormFieldInfo {

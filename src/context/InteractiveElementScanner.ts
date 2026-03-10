@@ -1,31 +1,5 @@
 import type { InteractiveElement, ElementCapability } from '../types';
-
-/**
- * Comprehensive CSS selector for interactive elements.
- */
-const INTERACTIVE_SELECTOR = [
-  'button',
-  'a',
-  '[role="button"]',
-  '[role="tab"]',
-  '[role="menuitem"]',
-  '[role="switch"]',
-  '[role="checkbox"]',
-  '[role="radio"]',
-  '[role="slider"]',
-  '[role="combobox"]',
-  '[role="option"]',
-  '[role="link"]',
-  '[tabindex]:not([tabindex="-1"])',
-  '[contenteditable="true"]',
-  'details > summary',
-  '[draggable="true"]',
-  '[onclick]',
-  '[data-action]',
-  'select',
-  'input',
-  'textarea',
-].join(', ');
+import { INTERACTIVE_SELECTOR } from '../constants';
 
 /**
  * Deeply scans the DOM for all interactive elements and categorizes
@@ -34,8 +8,11 @@ const INTERACTIVE_SELECTOR = [
  */
 export class InteractiveElementScanner {
   private maxElements: number;
+  private wasTruncated = false;
+  private totalFound = 0;
+  private includedCount = 0;
 
-  constructor(maxElements = 50) {
+  constructor(maxElements = 100) {
     this.maxElements = maxElements;
   }
 
@@ -45,10 +22,9 @@ export class InteractiveElementScanner {
   scan(): InteractiveElement[] {
     const rawElements = document.querySelectorAll(INTERACTIVE_SELECTOR);
     const results: InteractiveElement[] = [];
+    let visibleCount = 0;
 
     for (const el of rawElements) {
-      if (results.length >= this.maxElements) break;
-
       const htmlEl = el as HTMLElement;
 
       // Skip hidden elements
@@ -66,9 +42,15 @@ export class InteractiveElementScanner {
       const description = this.generateDescription(htmlEl);
       if (!description) continue;
 
+      // Count all visible qualifying elements, even if we don't include them
+      visibleCount++;
+
+      if (results.length >= this.maxElements) continue;
+
       const selector = this.generateSelector(htmlEl);
       const role = htmlEl.getAttribute('role') || undefined;
       const state = this.captureState(htmlEl);
+      const inViewport = this.isInViewport(htmlEl);
 
       results.push({
         description,
@@ -77,10 +59,35 @@ export class InteractiveElementScanner {
         role,
         capabilities,
         state: Object.keys(state).length > 0 ? state : undefined,
+        inViewport,
       });
     }
 
+    // Track truncation info
+    this.totalFound = visibleCount;
+    this.includedCount = results.length;
+    this.wasTruncated = visibleCount > results.length;
+
+    // Sort: viewport elements first, then off-screen
+    results.sort((a, b) => {
+      if (a.inViewport && !b.inViewport) return -1;
+      if (!a.inViewport && b.inViewport) return 1;
+      return 0;
+    });
+
     return results;
+  }
+
+  /**
+   * Returns truncation info from the last scan, or null if no scan has been performed.
+   */
+  getTruncationInfo(): { wasTruncated: boolean; included: number; total: number } | null {
+    if (this.totalFound === 0 && this.includedCount === 0) return null;
+    return {
+      wasTruncated: this.wasTruncated,
+      included: this.includedCount,
+      total: this.totalFound,
+    };
   }
 
   /**
@@ -91,7 +98,25 @@ export class InteractiveElementScanner {
     const interactiveCount = document.querySelectorAll(INTERACTIVE_SELECTOR).length;
     const formCount = document.querySelectorAll('form').length;
     const bodyChildCount = document.body ? document.body.children.length : 0;
-    return `${interactiveCount}:${formCount}:${bodyChildCount}`;
+
+    let valueHash = 0;
+    document.querySelectorAll('input, select, textarea').forEach((el) => {
+      const val = (el as HTMLInputElement).value;
+      if (val) valueHash = (valueHash * 31 + simpleHash(val)) | 0;
+    });
+
+    const contentLen = (document.querySelector('main') || document.body)?.textContent?.length || 0;
+    return `${interactiveCount}:${formCount}:${bodyChildCount}:${valueHash}:${contentLen}`;
+  }
+
+  private isInViewport(el: HTMLElement): boolean {
+    const rect = el.getBoundingClientRect();
+    return (
+      rect.top < window.innerHeight &&
+      rect.bottom > 0 &&
+      rect.left < window.innerWidth &&
+      rect.right > 0
+    );
   }
 
   private isHidden(el: HTMLElement): boolean {
@@ -140,7 +165,7 @@ export class InteractiveElementScanner {
     // Editable
     if (
       tag === 'input' || tag === 'textarea' ||
-      el.getAttribute('contenteditable') === 'true' ||
+      (el.hasAttribute('contenteditable') && el.getAttribute('contenteditable') !== 'false') ||
       role === 'combobox'
     ) {
       caps.push('editable');
@@ -168,10 +193,18 @@ export class InteractiveElementScanner {
 
   private generateDescription(el: HTMLElement): string {
     const tag = el.tagName.toLowerCase();
+    const role = el.getAttribute('role');
 
     // Try various sources for a descriptive label
     const ariaLabel = el.getAttribute('aria-label');
     if (ariaLabel) return this.truncate(ariaLabel, 60);
+
+    // aria-labelledby
+    const labelledBy = el.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      const labelEl = document.getElementById(labelledBy);
+      if (labelEl?.textContent?.trim()) return this.truncate(labelEl.textContent.trim(), 60);
+    }
 
     const title = el.getAttribute('title');
     if (title) return this.truncate(title, 60);
@@ -193,6 +226,53 @@ export class InteractiveElementScanner {
     // Text content (trimmed, truncated)
     const text = el.textContent?.trim();
     if (text) return this.truncate(text, 60);
+
+    // For label-less controls (switches, checkboxes), look at nearby sibling/parent text
+    if (role === 'switch' || role === 'checkbox' || role === 'radio' || role === 'slider') {
+      const nearby = this.findNearbyLabelText(el);
+      if (nearby) return this.truncate(nearby, 60);
+    }
+
+    return '';
+  }
+
+  /**
+   * For controls without their own text (role=switch, checkbox, etc.),
+   * look at sibling elements (preceding and following) and parent containers for label text.
+   */
+  private findNearbyLabelText(el: HTMLElement): string {
+    // Check preceding siblings for text
+    let sibling: Element | null = el.previousElementSibling;
+    while (sibling) {
+      const text = sibling.textContent?.trim();
+      if (text && text.length < 80) return text;
+      sibling = sibling.previousElementSibling;
+    }
+
+    // Check following siblings for text
+    sibling = el.nextElementSibling;
+    while (sibling) {
+      const text = sibling.textContent?.trim();
+      if (text && text.length < 80) return text;
+      sibling = sibling.nextElementSibling;
+    }
+
+    // Walk up to find a container with text that isn't just the element itself
+    let parent = el.parentElement;
+    for (let depth = 0; parent && depth < 3; depth++) {
+      // Look at siblings of the parent (both directions)
+      const prevSibling = parent.previousElementSibling;
+      if (prevSibling) {
+        const text = prevSibling.textContent?.trim();
+        if (text && text.length < 80) return text;
+      }
+      const nextSibling = parent.nextElementSibling;
+      if (nextSibling) {
+        const text = nextSibling.textContent?.trim();
+        if (text && text.length < 80) return text;
+      }
+      parent = parent.parentElement;
+    }
 
     return '';
   }
@@ -289,4 +369,12 @@ export class InteractiveElementScanner {
     if (clean.length <= max) return clean;
     return clean.slice(0, max - 3) + '...';
   }
+}
+
+function simpleHash(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return hash;
 }

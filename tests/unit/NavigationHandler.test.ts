@@ -254,7 +254,7 @@ describe('NavigationHandler', () => {
       expect(sessionStorage.getItem).toHaveBeenCalledWith(SESSION_STORAGE_KEY);
     });
 
-    it('returns parsed state and clears storage when data exists', () => {
+    it('returns parsed state without clearing storage', () => {
       const state = { config: { serverUrl: 'ws://localhost:3100' } };
       mockSessionStorage[SESSION_STORAGE_KEY] = JSON.stringify(state);
 
@@ -262,6 +262,15 @@ describe('NavigationHandler', () => {
 
       expect(result).toEqual(state);
       expect(sessionStorage.getItem).toHaveBeenCalledWith(SESSION_STORAGE_KEY);
+      // getPendingReconnect no longer removes — consumePendingReconnect does
+      expect(sessionStorage.removeItem).not.toHaveBeenCalled();
+    });
+
+    it('consumePendingReconnect removes from storage', () => {
+      mockSessionStorage[SESSION_STORAGE_KEY] = JSON.stringify({ config: { serverUrl: 'ws://test' } });
+
+      NavigationHandler.consumePendingReconnect();
+
       expect(sessionStorage.removeItem).toHaveBeenCalledWith(SESSION_STORAGE_KEY);
     });
 

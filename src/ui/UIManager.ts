@@ -1,9 +1,11 @@
 import type { UIConfig, TranscriptEvent } from '../types';
 import type { ConnectionStateValue } from '../constants';
-import { DEFAULT_UI } from '../constants';
+import { ConnectionState, DEFAULT_UI } from '../constants';
 import { SDK_STYLES } from './styles';
 import { FloatingButton } from './FloatingButton';
 import { TranscriptOverlay } from './TranscriptOverlay';
+import { UIStateMachine } from './UIStateMachine';
+import type { InputMode } from './FloatingButton';
 
 export class UIManager {
   private host: HTMLElement;
@@ -12,9 +14,26 @@ export class UIManager {
   private button: FloatingButton;
   private transcript: TranscriptOverlay | null = null;
   private config: Required<UIConfig>;
+  private inputMode: InputMode;
+  private abortController = new AbortController();
+  private stateMachine: UIStateMachine;
+  private destroyed = false;
 
-  constructor(config: UIConfig = {}, onToggle: () => void, onSendText?: (text: string) => void) {
+  constructor(
+    config: UIConfig = {},
+    onToggle: () => void,
+    onSendText?: (text: string) => void,
+    inputMode: InputMode = 'voice',
+  ) {
     this.config = { ...DEFAULT_UI, ...config };
+    this.inputMode = inputMode;
+
+    // Singleton: remove any existing SDK host element ("last writer wins")
+    const existing = document.querySelector('div[data-voice-sdk]');
+    if (existing) existing.remove();
+
+    // Create state machine
+    this.stateMachine = new UIStateMachine(inputMode);
 
     // Create Shadow DOM host
     this.host = document.createElement('div');
@@ -42,37 +61,157 @@ export class UIManager {
 
     // Create transcript overlay (before button so it appears above)
     if (this.config.showTranscript) {
-      this.transcript = new TranscriptOverlay(this.wrapper, this.config.transcriptAutoHideMs);
+      this.transcript = new TranscriptOverlay(this.wrapper, this.config.transcriptAutoHideMs, inputMode);
       if (onSendText) {
         this.transcript.setSendTextHandler(onSendText);
       }
     }
 
     // Create floating button
-    this.button = new FloatingButton(this.wrapper, onToggle);
+    this.button = new FloatingButton(this.wrapper, onToggle, inputMode);
+
+    // Subscribe button to state changes
+    this.stateMachine.subscribe((current) => {
+      this.button.render(current);
+    });
+
+    // Subscribe transcript header visibility to state changes
+    this.stateMachine.subscribe((current, previous) => {
+      if (!this.transcript) return;
+      const wasConnected = previous.connection === ConnectionState.CONNECTED;
+      const isConnected = current.connection === ConnectionState.CONNECTED;
+      if (wasConnected !== isConnected) {
+        this.transcript.setHeaderVisible(isConnected);
+      }
+    });
+
+    // Subscribe thinking indicator to state changes
+    this.stateMachine.subscribe((current, previous) => {
+      if (!this.transcript) return;
+      if (current.aiThinking !== previous.aiThinking) {
+        if (current.aiThinking) {
+          this.transcript.showThinkingIndicator();
+        } else {
+          this.transcript.removeThinkingIndicator();
+        }
+      }
+    });
+
+    // Keyboard shortcut: Ctrl/Cmd+K to focus text input
+    document.addEventListener('keydown', (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        this.focusInput();
+      }
+    }, { signal: this.abortController.signal });
   }
 
   setConnectionState(state: ConnectionStateValue): void {
-    this.button.setState(state);
+    if (this.destroyed) return;
+    this.stateMachine.setConnection(state);
   }
 
   addTranscript(event: TranscriptEvent): void {
+    if (this.destroyed) return;
     this.transcript?.addTranscript(event);
   }
 
+  /**
+   * Show a tool execution status in the transcript.
+   */
+  showToolStatus(toolName: string): void {
+    if (this.destroyed) return;
+    this.transcript?.showToolStatus(toolName);
+  }
+
+  /**
+   * Remove the tool execution status from the transcript.
+   */
+  removeToolStatus(): void {
+    if (this.destroyed) return;
+    this.transcript?.removeToolStatus();
+  }
+
   showTranscript(): void {
+    if (this.destroyed) return;
     this.transcript?.show();
+    this.stateMachine.showPanel();
   }
 
   hideTranscript(): void {
+    if (this.destroyed) return;
     this.transcript?.hide();
+    this.stateMachine.hidePanel();
+  }
+
+  /**
+   * Enable or disable auto-hide on the transcript panel.
+   * Disabled during active sessions so the panel stays visible.
+   */
+  setAutoHideEnabled(enabled: boolean): void {
+    if (this.destroyed) return;
+    this.transcript?.setAutoHideEnabled(enabled);
   }
 
   clearTranscript(): void {
+    if (this.destroyed) return;
     this.transcript?.clear();
   }
 
+  /**
+   * Toggle transcript panel visibility (for text mode toggle behavior).
+   */
+  toggleTranscript(): void {
+    if (this.destroyed) return;
+    this.transcript?.toggleVisibility();
+    this.stateMachine.togglePanel();
+  }
+
+  /**
+   * Focus the text input in the transcript.
+   */
+  focusInput(): void {
+    if (this.destroyed) return;
+    this.transcript?.show();
+    this.transcript?.focusInput();
+  }
+
+  /**
+   * Set AI thinking state — shows/hides animated indicator.
+   */
+  setAIThinking(thinking: boolean): void {
+    if (this.destroyed) return;
+    this.stateMachine.setAIThinking(thinking);
+  }
+
+  /**
+   * Restore transcript lines from sessionStorage.
+   */
+  restoreTranscript(): void {
+    if (this.destroyed) return;
+    this.transcript?.restoreTranscript();
+  }
+
+  /**
+   * Set a handler for the panel disconnect/close button.
+   */
+  setDisconnectHandler(handler: () => void): void {
+    if (this.destroyed) return;
+    this.transcript?.setDisconnectHandler(handler);
+  }
+
+  /**
+   * Get the UI state machine (for advanced usage).
+   */
+  getStateMachine(): UIStateMachine {
+    return this.stateMachine;
+  }
+
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.abortController.abort();
+    this.stateMachine.markDestroyed();
     this.button.destroy();
     this.transcript?.destroy();
     this.host.remove();

@@ -1,5 +1,6 @@
 import { SESSION_STORAGE_KEY } from '../constants';
 import type { SessionState, VoiceSDKConfig } from '../types';
+import { invalidateElementCache } from './DOMActions';
 
 /**
  * Handles page navigation with session persistence.
@@ -8,10 +9,15 @@ import type { SessionState, VoiceSDKConfig } from '../types';
 export class NavigationHandler {
   private config: VoiceSDKConfig;
   private allowCrossOrigin: boolean;
+  private sessionId: string | null = null;
 
   constructor(config: VoiceSDKConfig) {
     this.config = config;
     this.allowCrossOrigin = config.actions?.allowCrossOrigin ?? false;
+  }
+
+  setSessionId(id: string): void {
+    this.sessionId = id;
   }
 
   async navigateTo(args: Record<string, unknown>): Promise<{ result: string }> {
@@ -36,6 +42,9 @@ export class NavigationHandler {
       this.saveSessionState();
     }
 
+    // Invalidate element caches before navigation
+    invalidateElementCache();
+
     // Navigate
     window.location.href = resolved.href;
 
@@ -54,6 +63,7 @@ export class NavigationHandler {
           allowCrossOrigin: this.config.actions.allowCrossOrigin,
         } : undefined,
       },
+      sessionId: this.sessionId || undefined,
     };
 
     try {
@@ -65,15 +75,27 @@ export class NavigationHandler {
 
   /**
    * Check if there's a pending reconnect from a previous navigation.
+   * Does NOT remove the stored state — call consumePendingReconnect() after successful reconnect.
    */
   static getPendingReconnect(): SessionState | null {
     try {
       const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
       if (!raw) return null;
-      sessionStorage.removeItem(SESSION_STORAGE_KEY);
       return JSON.parse(raw);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Remove the pending reconnect state from sessionStorage.
+   * Should be called after a successful reconnect.
+   */
+  static consumePendingReconnect(): void {
+    try {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+      // Ignore
     }
   }
 
