@@ -75,10 +75,17 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
       );
     }
 
+    // Wire disconnect handler from panel header
+    if (this.ui) {
+      this.ui.setDisconnectHandler(() => this.stop());
+    }
+
     // Check for pending reconnect from navigation
     if (config.autoReconnect !== false) {
       const pending = NavigationHandler.getPendingReconnect();
       if (pending) {
+        // Restore transcript from previous page
+        this.ui?.restoreTranscript();
         setTimeout(() => this.start(), 500);
       }
     }
@@ -150,6 +157,8 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
             if (this.session?.sessionId) {
               this.actionRouter.setNavigationSessionId(this.session.sessionId);
             }
+            // Clear pending reconnect now that we've successfully connected
+            NavigationHandler.consumePendingReconnect();
           } else if (status === 'disconnected') {
             // Ignore stale disconnect if already disconnected (e.g. from old WS onclose)
             if (this.connectionState === ConnectionState.DISCONNECTED) return;
@@ -164,6 +173,13 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           this.emit('transcript', event);
           this.ui?.addTranscript(event);
 
+          // Show/hide AI thinking indicator
+          if (speaker === 'user' && isFinal) {
+            this.ui?.setAIThinking(true);
+          } else if (speaker === 'ai' && isFinal) {
+            this.ui?.setAIThinking(false);
+          }
+
           // Speak AI responses if TTS is enabled
           if (speaker === 'ai' && isFinal && this.ttsEnabled) {
             this.speak(text);
@@ -172,6 +188,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         onToolCall: async (fc) => {
           const actionEvent: ActionEvent = { name: fc.name, args: fc.args };
           this.emit('action:before', actionEvent);
+
+          // AI responded with action — no longer "thinking"
+          this.ui?.setAIThinking(false);
 
           // Show tool status in UI
           this.ui?.showToolStatus(fc.name);
@@ -353,6 +372,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     if (this.config.debug) {
       console.log('[VoiceSDK:scan] scanPage tool called, re-scanning');
     }
+
+    // Invalidate element caches before re-scanning
+    invalidateElementCache();
 
     if (this.pageContextProvider) {
       this.pageContextProvider.markDirty();
