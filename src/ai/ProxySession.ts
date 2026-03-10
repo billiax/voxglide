@@ -19,9 +19,20 @@ export class ProxySession {
   private speechDebounceText = '';
   private static readonly SPEECH_DEBOUNCE_MS = 800;
 
+  // Speech debounce max delay cap
+  private speechDebounceStart: number | null = null;
+  private static readonly SPEECH_MAX_DEBOUNCE_MS = 2000;
+
   // Send queue: buffers text messages when WS is not OPEN
   private sendQueue: Array<{ type: string;[key: string]: any }> = [];
   private static readonly MAX_QUEUE_SIZE = 20;
+
+  // Dual pause tracking for voice ↔ text input mutual exclusion
+  private textInputActive = false;
+  private ttsPaused = false;
+
+  // Pending context update during speech debounce
+  private pendingContextUpdate: string | null = null;
 
   /** The server-assigned session ID, available after connection. */
   public sessionId: string | null = null;
@@ -102,6 +113,10 @@ export class ProxySession {
       case 'response.delta':
         // Streaming chunk — accumulate and show partial
         this.streamingText += msg.text;
+        // Cap streaming accumulator to prevent unbounded growth
+        if (this.streamingText.length > 10_000) {
+          this.streamingText = this.streamingText.slice(-8_000);
+        }
         this.callbacks.onTranscript(this.streamingText, 'ai', false);
         break;
 
@@ -157,7 +172,8 @@ export class ProxySession {
 
   /**
    * Batches rapid isFinal speech results into a single server send.
-   * Resets/extends an 800ms timer on each call. On timeout, sends the combined text.
+   * Resets/extends an 800ms timer on each call, but caps total delay at 2000ms.
+   * On timeout, sends the combined text and flushes any pending context update.
    */
   private debounceSpeechSend(text: string): void {
     if (this.speechDebounceText) {
@@ -166,33 +182,69 @@ export class ProxySession {
       this.speechDebounceText = text;
     }
 
+    // Track when batching started
+    if (this.speechDebounceStart === null) {
+      this.speechDebounceStart = Date.now();
+    }
+
     if (this.speechDebounceTimer) {
       clearTimeout(this.speechDebounceTimer);
     }
 
+    const elapsed = Date.now() - this.speechDebounceStart;
+
+    // If max debounce time exceeded, flush immediately
+    if (elapsed >= ProxySession.SPEECH_MAX_DEBOUNCE_MS) {
+      this.flushSpeechDebounce();
+      return;
+    }
+
+    // Cap the timer delay to remaining time within max debounce window
+    const remaining = ProxySession.SPEECH_MAX_DEBOUNCE_MS - elapsed;
+    const delay = Math.min(ProxySession.SPEECH_DEBOUNCE_MS, remaining);
+
     this.speechDebounceTimer = setTimeout(() => {
       this.speechDebounceTimer = null;
+      this.speechDebounceStart = null;
       const combined = this.speechDebounceText;
       this.speechDebounceText = '';
       if (combined) {
         this.send({ type: 'text', text: combined });
       }
-    }, ProxySession.SPEECH_DEBOUNCE_MS);
+      // Flush any pending context update that was deferred during speech debounce
+      this.flushPendingContextUpdate();
+    }, delay);
   }
 
   /**
    * Immediately sends any pending debounced speech text.
    * Called on disconnect to avoid losing speech in progress.
+   * Also flushes any pending context update.
    */
   private flushSpeechDebounce(): void {
     if (this.speechDebounceTimer) {
       clearTimeout(this.speechDebounceTimer);
       this.speechDebounceTimer = null;
     }
+    this.speechDebounceStart = null;
     const combined = this.speechDebounceText;
     this.speechDebounceText = '';
     if (combined) {
       this.send({ type: 'text', text: combined });
+    }
+    // Flush any pending context update that was deferred during speech debounce
+    this.flushPendingContextUpdate();
+  }
+
+  /**
+   * Send any pending context update that was deferred during speech debounce.
+   */
+  private flushPendingContextUpdate(): void {
+    if (this.pendingContextUpdate !== null) {
+      const context = this.pendingContextUpdate;
+      this.pendingContextUpdate = null;
+      this.debug({ direction: 'send', kind: 'context.update', payload: { length: context.length, deferred: true } });
+      this.send({ type: 'context.update', context });
     }
   }
 
@@ -279,9 +331,11 @@ export class ProxySession {
 
   /**
    * Send text directly to the server (text mode / debugging).
+   * Flushes any pending speech debounce first to avoid race conditions.
    */
   sendText(text: string): void {
     if (!text.trim()) return;
+    this.flushSpeechDebounce();
     this.callbacks.onTranscript(text, 'user', true);
     this.send({ type: 'text', text: text.trim() });
   }
@@ -295,24 +349,55 @@ export class ProxySession {
 
   /**
    * Send a context update to the server mid-session.
+   * If speech debounce is pending, defers the update to avoid interleaving.
    */
   sendContextUpdate(context: string): void {
+    // If speech debounce is in progress, defer context update
+    if (this.speechDebounceTimer !== null) {
+      this.pendingContextUpdate = context;
+      this.debug({ direction: 'send', kind: 'context.update', payload: { length: context.length, deferred: true } });
+      return;
+    }
     this.debug({ direction: 'send', kind: 'context.update', payload: { length: context.length } });
     this.send({ type: 'context.update', context });
   }
 
   /**
-   * Pause speech recognition (e.g., while TTS is playing).
+   * Pause speech recognition for TTS playback.
    */
   pauseSpeech(): void {
+    this.ttsPaused = true;
     this.speechCapture?.pause();
   }
 
   /**
-   * Resume speech recognition after a pause.
+   * Resume speech recognition after TTS playback.
+   * Only resumes if text input is not also active.
    */
   resumeSpeech(): void {
-    this.speechCapture?.resume();
+    this.ttsPaused = false;
+    if (!this.textInputActive) {
+      this.speechCapture?.resume();
+    }
+  }
+
+  /**
+   * Pause speech recognition when text input becomes active.
+   */
+  pauseSpeechForTextInput(): void {
+    this.textInputActive = true;
+    this.speechCapture?.pause();
+  }
+
+  /**
+   * Resume speech recognition when text input is dismissed.
+   * Only resumes if TTS is not also paused.
+   */
+  resumeSpeechFromTextInput(): void {
+    this.textInputActive = false;
+    if (!this.ttsPaused) {
+      this.speechCapture?.resume();
+    }
   }
 
   isConnected(): boolean {
