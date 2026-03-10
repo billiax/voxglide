@@ -35,3 +35,7 @@ export { ContextCache } from './context/ContextCache';
 export { ActionRouter } from './actions/ActionRouter';
 export { EventEmitter } from './events';
 export { ConnectionState } from './constants';
+export { UIStateMachine } from './ui/UIStateMachine';
+export type { UIState, UIStateListener } from './ui/UIStateMachine';
+export { TranscriptStore } from './ui/TranscriptStore';
+export type { StoredTranscriptLine } from './ui/TranscriptStore';

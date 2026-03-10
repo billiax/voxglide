@@ -1,5 +1,7 @@
 import type { TranscriptEvent } from '../types';
 import type { InputMode } from './FloatingButton';
+import { TranscriptStore } from './TranscriptStore';
+import type { StoredTranscriptLine } from './TranscriptStore';
 
 export class TranscriptOverlay {
   private container: HTMLElement;
@@ -7,11 +9,15 @@ export class TranscriptOverlay {
   private autoHideEnabled = true;
   private hideTimeout: ReturnType<typeof setTimeout> | null = null;
   private lines: HTMLElement[] = [];
+  private storedLines: StoredTranscriptLine[] = [];
   private maxLines = 10;
   private inputRow: HTMLElement | null = null;
   private onSendText: ((text: string) => void) | null = null;
+  private onDisconnect: (() => void) | null = null;
   private inputMode: InputMode;
   private toolStatusEl: HTMLElement | null = null;
+  private thinkingEl: HTMLElement | null = null;
+  private headerEl: HTMLElement | null = null;
 
   constructor(parent: HTMLElement, autoHideMs: number, inputMode: InputMode = 'voice') {
     this.autoHideMs = autoHideMs;
@@ -23,6 +29,27 @@ export class TranscriptOverlay {
       this.container.classList.add('text-mode');
     }
     parent.prepend(this.container);
+
+    // Panel header (hidden by default)
+    this.headerEl = document.createElement('div');
+    this.headerEl.className = 'vsdk-panel-header';
+    this.headerEl.style.display = 'none';
+
+    const title = document.createElement('span');
+    title.className = 'vsdk-panel-title';
+    title.textContent = 'Assistant';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'vsdk-panel-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.setAttribute('aria-label', 'Disconnect');
+    closeBtn.addEventListener('click', () => {
+      this.onDisconnect?.();
+    });
+
+    this.headerEl.appendChild(title);
+    this.headerEl.appendChild(closeBtn);
+    this.container.appendChild(this.headerEl);
 
     // Text input row
     this.inputRow = document.createElement('div');
@@ -63,7 +90,20 @@ export class TranscriptOverlay {
     this.onSendText = handler;
   }
 
+  setDisconnectHandler(handler: () => void): void {
+    this.onDisconnect = handler;
+  }
+
+  setHeaderVisible(visible: boolean): void {
+    if (this.headerEl) {
+      this.headerEl.style.display = visible ? '' : 'none';
+    }
+  }
+
   addTranscript(event: TranscriptEvent): void {
+    // Remove thinking indicator when new content arrives
+    this.removeThinkingIndicator();
+
     // Show the overlay
     this.container.classList.add('visible');
     if (this.inputMode !== 'text') {
@@ -96,6 +136,9 @@ export class TranscriptOverlay {
         textSpan.textContent = event.text;
         lastLine.dataset.final = 'true';
         this.container.scrollTop = this.container.scrollHeight;
+        // Persist final line
+        this.storedLines.push({ speaker: event.speaker, text: event.text });
+        TranscriptStore.save(this.storedLines);
         return;
       }
     }
@@ -103,6 +146,29 @@ export class TranscriptOverlay {
     const line = this.createLine(event);
     line.dataset.final = 'true';
     this.appendLine(line);
+
+    // Persist final line
+    this.storedLines.push({ speaker: event.speaker, text: event.text });
+    TranscriptStore.save(this.storedLines);
+  }
+
+  /**
+   * Restore transcript lines from sessionStorage.
+   */
+  restoreTranscript(): void {
+    const stored = TranscriptStore.load();
+    if (stored.length === 0) return;
+
+    this.storedLines = [...stored];
+
+    for (const entry of stored) {
+      const line = this.createLine({ speaker: entry.speaker, text: entry.text, isFinal: true });
+      line.dataset.final = 'true';
+      line.classList.add('vsdk-restored');
+      this.appendLine(line);
+    }
+
+    this.container.classList.add('visible');
   }
 
   /**
@@ -127,6 +193,28 @@ export class TranscriptOverlay {
     }
   }
 
+  /**
+   * Show an animated "AI is thinking" indicator.
+   */
+  showThinkingIndicator(): void {
+    this.removeThinkingIndicator();
+    this.thinkingEl = document.createElement('div');
+    this.thinkingEl.className = 'vsdk-thinking';
+    this.thinkingEl.innerHTML = '<span></span><span></span><span></span>';
+    this.container.insertBefore(this.thinkingEl, this.inputRow);
+    this.container.scrollTop = this.container.scrollHeight;
+  }
+
+  /**
+   * Remove the "AI is thinking" indicator.
+   */
+  removeThinkingIndicator(): void {
+    if (this.thinkingEl) {
+      this.thinkingEl.remove();
+      this.thinkingEl = null;
+    }
+  }
+
   show(): void {
     this.container.classList.add('visible');
     if (this.inputMode !== 'text') {
@@ -138,10 +226,17 @@ export class TranscriptOverlay {
     this.container.classList.remove('visible');
   }
 
+  isVisible(): boolean {
+    return this.container.classList.contains('visible');
+  }
+
   clear(): void {
     this.lines.forEach((l) => l.remove());
     this.lines = [];
+    this.storedLines = [];
     this.removeToolStatus();
+    this.removeThinkingIndicator();
+    TranscriptStore.clear();
     this.hide();
   }
 
@@ -164,7 +259,7 @@ export class TranscriptOverlay {
     input?.focus();
   }
 
-  private createLine(event: TranscriptEvent): HTMLElement {
+  private createLine(event: { speaker: 'user' | 'ai'; text: string; isFinal?: boolean }): HTMLElement {
     const line = document.createElement('div');
     line.className = 'vsdk-transcript-line';
 
@@ -198,21 +293,33 @@ export class TranscriptOverlay {
    */
   setAutoHideEnabled(enabled: boolean): void {
     this.autoHideEnabled = enabled;
-    if (!enabled && this.hideTimeout) {
+    if (!enabled) {
+      this.clearAutoHideTimer();
+    } else {
+      // When re-enabling: if panel is visible and not text mode, restart timer
+      if (this.inputMode !== 'text' && this.isVisible()) {
+        this.resetAutoHide();
+      }
+    }
+  }
+
+  private clearAutoHideTimer(): void {
+    if (this.hideTimeout) {
       clearTimeout(this.hideTimeout);
       this.hideTimeout = null;
     }
   }
 
   private resetAutoHide(): void {
-    if (this.hideTimeout) clearTimeout(this.hideTimeout);
+    this.clearAutoHideTimer();
     if (this.autoHideMs > 0 && this.autoHideEnabled) {
       this.hideTimeout = setTimeout(() => this.hide(), this.autoHideMs);
     }
   }
 
   destroy(): void {
-    if (this.hideTimeout) clearTimeout(this.hideTimeout);
+    this.clearAutoHideTimer();
+    this.removeThinkingIndicator();
     this.container.remove();
   }
 }

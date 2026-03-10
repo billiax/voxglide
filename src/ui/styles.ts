@@ -245,4 +245,95 @@ export const SDK_STYLES = `
     background: var(--vsdk-danger);
     animation: none;
   }
+
+  /* Panel header */
+  .vsdk-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--vsdk-border);
+  }
+
+  .vsdk-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--vsdk-text);
+  }
+
+  .vsdk-panel-close {
+    pointer-events: auto;
+    border: none;
+    background: none;
+    color: var(--vsdk-text-muted);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .vsdk-panel-close:hover {
+    background: var(--vsdk-border);
+    color: var(--vsdk-text);
+  }
+
+  /* AI thinking indicator */
+  .vsdk-thinking {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 0;
+  }
+
+  .vsdk-thinking span {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--vsdk-text-muted);
+    animation: vsdk-dot-bounce 1.4s ease-in-out infinite both;
+  }
+
+  .vsdk-thinking span:nth-child(1) {
+    animation-delay: 0s;
+  }
+
+  .vsdk-thinking span:nth-child(2) {
+    animation-delay: 0.16s;
+  }
+
+  .vsdk-thinking span:nth-child(3) {
+    animation-delay: 0.32s;
+  }
+
+  @keyframes vsdk-dot-bounce {
+    0%, 80%, 100% {
+      transform: scale(0.6);
+      opacity: 0.4;
+    }
+    40% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  /* Restored transcript lines */
+  .vsdk-transcript-line.vsdk-restored {
+    opacity: 0.6;
+  }
+
+  /* Dark mode */
+  @media (prefers-color-scheme: dark) {
+    :host {
+      --vsdk-bg: #1f2937;
+      --vsdk-bg-overlay: rgba(31, 41, 55, 0.95);
+      --vsdk-text: #f3f4f6;
+      --vsdk-text-muted: #9ca3af;
+      --vsdk-border: #374151;
+      --vsdk-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+    }
+  }
 `;

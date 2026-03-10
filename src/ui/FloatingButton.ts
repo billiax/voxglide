@@ -1,19 +1,16 @@
-import { micIcon, micOffIcon, loaderIcon, chatIcon } from './icons';
-import type { ConnectionStateValue } from '../constants';
+import { micIcon, micOffIcon, loaderIcon, chatIcon, closeIcon } from './icons';
 import { ConnectionState } from '../constants';
+import type { UIState } from './UIStateMachine';
 
 export type ButtonClickHandler = () => void;
 export type InputMode = 'voice' | 'text';
 
 export class FloatingButton {
   private button: HTMLButtonElement;
-  private state: ConnectionStateValue = ConnectionState.DISCONNECTED;
   private onClick: ButtonClickHandler;
-  private inputMode: InputMode;
 
   constructor(parent: HTMLElement, onClick: ButtonClickHandler, inputMode: InputMode = 'voice') {
     this.onClick = onClick;
-    this.inputMode = inputMode;
 
     this.button = document.createElement('button');
     this.button.className = 'vsdk-btn';
@@ -23,19 +20,23 @@ export class FloatingButton {
     parent.appendChild(this.button);
   }
 
-  setState(state: ConnectionStateValue): void {
-    this.state = state;
-
+  render(state: Readonly<UIState>): void {
     // Remove all state classes
     this.button.classList.remove('listening', 'connecting');
 
-    if (this.inputMode === 'text') {
-      // Text mode: toggle between open/close chat icon
-      switch (state) {
+    if (state.inputMode === 'text') {
+      // Text mode
+      switch (state.connection) {
         case ConnectionState.CONNECTED:
           this.button.classList.add('listening');
-          this.button.innerHTML = chatIcon;
-          this.button.setAttribute('aria-label', 'Close chat');
+          // Show close icon when panel is visible, chat icon when hidden
+          if (state.panelVisible) {
+            this.button.innerHTML = closeIcon;
+            this.button.setAttribute('aria-label', 'Close chat');
+          } else {
+            this.button.innerHTML = chatIcon;
+            this.button.setAttribute('aria-label', 'Open chat');
+          }
           break;
         case ConnectionState.CONNECTING:
           this.button.classList.add('connecting');
@@ -49,7 +50,7 @@ export class FloatingButton {
       }
     } else {
       // Voice mode: mic icons
-      switch (state) {
+      switch (state.connection) {
         case ConnectionState.CONNECTED:
           this.button.classList.add('listening');
           this.button.innerHTML = micOffIcon;
@@ -68,10 +69,6 @@ export class FloatingButton {
           break;
       }
     }
-  }
-
-  getState(): ConnectionStateValue {
-    return this.state;
   }
 
   destroy(): void {
