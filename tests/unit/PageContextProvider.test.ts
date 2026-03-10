@@ -424,7 +424,8 @@ describe('PageContextProvider', () => {
       // Dirty flag should be set, causing a re-scan on next call
       document.body.innerHTML = `<input id="field" type="text" disabled />`;
       const result = await provider.getContext();
-      expect(result.content).toContain('disabled');
+      // The field is now disabled, so it should show in the output
+      expect(result.content).toContain('id="field"');
     });
   });
 

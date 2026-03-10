@@ -2,6 +2,8 @@ import type { ContextProvider, ContextResult, FormFieldInfo, PageContext } from 
 import { DEFAULT_AUTO_CONTEXT } from '../constants';
 import type { AutoContextConfig } from '../types';
 import { InteractiveElementScanner } from './InteractiveElementScanner';
+import { TokenBudget } from './TokenBudget';
+import { ContextCache } from './ContextCache';
 
 /**
  * Automatically scans the DOM to build AI context.
@@ -20,6 +22,10 @@ export class PageContextProvider implements ContextProvider {
   private lastFingerprint = '';
   private onChangeCallback: (() => void) | null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private tokenBudget: TokenBudget;
+  private contextCache: ContextCache;
+  private lastFormattedContext = '';
+  private sectionFingerprints: Record<string, string> = {};
 
   constructor(config: AutoContextConfig | true = true, onChange?: () => void) {
     this.config = config === true
@@ -28,6 +34,9 @@ export class PageContextProvider implements ContextProvider {
 
     this.interactiveScanner = new InteractiveElementScanner();
     this.onChangeCallback = onChange || null;
+    this.tokenBudget = new TokenBudget(this.config.maxContextTokens);
+    this.contextCache = new ContextCache();
+    this.contextCache.loadFromStorage();
     this.startObserving();
   }
 
@@ -78,14 +87,33 @@ export class PageContextProvider implements ContextProvider {
 
   async getContext(): Promise<ContextResult> {
     if (!this.dirty && this.cachedContext) {
-      return { content: this.formatContext(this.cachedContext), tools: [] };
+      return { content: this.lastFormattedContext, tools: [] };
     }
 
-    const context = this.scanPage();
+    // Check context cache by URL + fingerprint
+    const url = typeof window !== 'undefined' ? window.location.href : '';
+    const fingerprint = this.interactiveScanner.computeFingerprint();
+    const cached = this.contextCache.get(url, fingerprint);
+
+    let context: PageContext;
+    if (cached) {
+      context = cached;
+    } else {
+      context = this.scanPage();
+      this.contextCache.set(url, fingerprint, context);
+    }
+
     this.cachedContext = context;
     this.dirty = false;
 
-    return { content: this.formatContext(context), tools: [] };
+    const formatted = this.formatContext(context);
+
+    // Only report change if actual content changed
+    if (formatted !== this.lastFormattedContext) {
+      this.lastFormattedContext = formatted;
+    }
+
+    return { content: formatted, tools: [] };
   }
 
   private scanPage(): PageContext {
@@ -225,19 +253,19 @@ export class PageContextProvider implements ContextProvider {
   }
 
   private formatContext(ctx: PageContext): string {
-    const parts: string[] = [];
+    // Build sections with priorities for token budget allocation
+    const sections: Array<{ name: string; content: string; priority: number }> = [];
 
-    parts.push(`Page: ${ctx.title}`);
-    parts.push(`URL: ${ctx.url}`);
-    if (ctx.description) parts.push(`Description: ${ctx.description}`);
+    // Header section (always included, high priority)
+    const headerParts: string[] = [];
+    headerParts.push(`Page: ${ctx.title}`);
+    headerParts.push(`URL: ${ctx.url}`);
+    if (ctx.description) headerParts.push(`Description: ${ctx.description}`);
+    sections.push({ name: 'header', content: headerParts.join('\n'), priority: 10 });
 
-    if (ctx.headings.length > 0) {
-      parts.push('\nPage Outline:');
-      ctx.headings.forEach((h) => parts.push(`${'  '.repeat(h.level - 1)}${h.text}`));
-    }
-
+    // Forms section (high priority)
     if (ctx.forms.length > 0) {
-      parts.push('\nForm Fields (use these IDs with fillField):');
+      const formLines: string[] = ['Form Fields (use these IDs with fillField):'];
       ctx.forms.forEach((f) => {
         const attrs = [
           `type="${f.type}"`,
@@ -248,34 +276,52 @@ export class PageContextProvider implements ContextProvider {
           f.disabled ? 'disabled' : '',
           f.options ? `options=[${f.options.join(', ')}]` : '',
         ].filter(Boolean).join(' ');
-        parts.push(`  - id="${f.id}" ${attrs}`);
+        formLines.push(`  - id="${f.id}" ${attrs}`);
       });
+      sections.push({ name: 'forms', content: formLines.join('\n'), priority: 10 });
     }
 
-    if (ctx.navigation.length > 0) {
-      parts.push('\nNavigation Links:');
-      ctx.navigation.forEach((n) => parts.push(`  - "${n.text}" → ${n.href}`));
-    }
-
+    // Interactive elements (medium-high priority)
     if (ctx.interactiveElements.length > 0) {
-      parts.push('\nInteractive Elements:');
+      const elLines: string[] = ['Interactive Elements:'];
+      // Viewport elements are already sorted first by the scanner
       ctx.interactiveElements.forEach((el) => {
         const caps = el.capabilities.join(', ');
         const stateStr = el.state
           ? ' (' + Object.entries(el.state).map(([k, v]) => `${k}=${v}`).join(', ') + ')'
           : '';
         const tag = el.role || el.tagName;
-        const href = el.tagName === 'a' && el.selector ? '' : '';
-        parts.push(`  - [${tag}] "${el.description}"${href} — ${caps}${stateStr}`);
+        elLines.push(`  - [${tag}] "${el.description}" \u2014 ${caps}${stateStr}`);
+      });
+      sections.push({ name: 'interactive', content: elLines.join('\n'), priority: 8 });
+    }
+
+    // Headings (medium priority)
+    if (ctx.headings.length > 0) {
+      const headingLines: string[] = ['Page Outline:'];
+      ctx.headings.forEach((h) => headingLines.push(`${'  '.repeat(h.level - 1)}${h.text}`));
+      sections.push({ name: 'headings', content: headingLines.join('\n'), priority: 6 });
+    }
+
+    // Navigation (medium priority)
+    if (ctx.navigation.length > 0) {
+      const navLines: string[] = ['Navigation Links:'];
+      ctx.navigation.forEach((n) => navLines.push(`  - "${n.text}" \u2192 ${n.href}`));
+      sections.push({ name: 'navigation', content: navLines.join('\n'), priority: 5 });
+    }
+
+    // Content (lower priority)
+    if (ctx.content) {
+      sections.push({
+        name: 'content',
+        content: 'Page Content (truncated):\n' + ctx.content,
+        priority: 3,
       });
     }
 
-    if (ctx.content) {
-      parts.push('\nPage Content (truncated):');
-      parts.push(ctx.content);
-    }
-
-    return parts.join('\n');
+    // Apply token budget
+    const allocated = this.tokenBudget.allocate(sections);
+    return allocated.map((s) => s.content).join('\n\n');
   }
 
   destroy(): void {
@@ -287,6 +333,7 @@ export class PageContextProvider implements ContextProvider {
       this.observer.disconnect();
       this.observer = null;
     }
+    this.contextCache.saveToStorage();
     this.cachedContext = null;
   }
 }

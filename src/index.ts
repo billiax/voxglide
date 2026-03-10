@@ -30,6 +30,8 @@ export { ContextEngine } from './context/ContextEngine';
 export { TextProvider } from './context/TextProvider';
 export { PageContextProvider } from './context/PageContextProvider';
 export { InteractiveElementScanner } from './context/InteractiveElementScanner';
+export { TokenBudget } from './context/TokenBudget';
+export { ContextCache } from './context/ContextCache';
 export { ActionRouter } from './actions/ActionRouter';
 export { EventEmitter } from './events';
 export { ConnectionState } from './constants';

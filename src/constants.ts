@@ -20,7 +20,32 @@ export const DEFAULT_AUTO_CONTEXT: Required<AutoContextConfig> = {
   interactiveElements: true,
   exclude: [],
   maxContentLength: 3000,
+  maxContextTokens: 4000,
 };
+
+export const INTERACTIVE_SELECTOR = [
+  'button',
+  'a',
+  '[role="button"]',
+  '[role="tab"]',
+  '[role="menuitem"]',
+  '[role="switch"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="slider"]',
+  '[role="combobox"]',
+  '[role="option"]',
+  '[role="link"]',
+  '[tabindex]:not([tabindex="-1"])',
+  '[contenteditable="true"]',
+  'details > summary',
+  '[draggable="true"]',
+  '[onclick]',
+  '[data-action]',
+  'select',
+  'input',
+  'textarea',
+].join(', ');
 
 export const DEFAULT_UI: Required<UIConfig> = {
   position: 'bottom-right',
