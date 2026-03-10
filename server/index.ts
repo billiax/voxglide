@@ -20,6 +20,12 @@ if (!GEMINI_API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
+// ── Constants ──
+
+const SUMMARIZATION_THRESHOLD = 100_000;
+const KEEP_RECENT_TURNS = 6;
+const SESSION_CLEANUP_MS = 30 * 60 * 1000; // 30 minutes
+
 // ── Types ──
 
 interface SessionEvent {
@@ -32,6 +38,15 @@ interface Session {
   history: Content[];
   systemInstruction: string;
   tools: Tool[];
+  lastPromptTokenCount: number;
+  lastOutputTokenCount: number;
+  conversationSummary: string | null;
+}
+
+interface PendingToolTurn {
+  resolve: (results: any[]) => void;
+  results: any[];
+  expectedCount: number;
 }
 
 interface TrackedSession {
@@ -39,9 +54,15 @@ interface TrackedSession {
   id: string;
   pageUrl: string;
   connectedAt: number;
+  disconnectedAt: number | null;
   events: SessionEvent[];
   messageCount: number;
   disconnected: boolean;
+  clientWs: WebSocket | null;
+  cleanupTimer: ReturnType<typeof setTimeout> | null;
+  pendingToolResultsByTurn: Map<string, PendingToolTurn>;
+  turnQueue: Array<() => Promise<void>>;
+  turnProcessing: boolean;
 }
 
 // ── Session & Admin State ──
@@ -80,6 +101,72 @@ function getSessionSummary(tracked: TrackedSession) {
     messageCount: tracked.messageCount,
     disconnected: tracked.disconnected,
   };
+}
+
+// ── History Management ──
+
+function estimateTokens(history: Content[]): number {
+  let chars = 0;
+  for (const entry of history) {
+    for (const part of entry.parts || []) {
+      if ((part as any).text) chars += (part as any).text.length;
+      else chars += JSON.stringify(part).length;
+    }
+  }
+  return Math.ceil(chars / 4);
+}
+
+async function maybeSummarizeHistory(session: Session, tracked: TrackedSession): Promise<void> {
+  // Estimate next prompt tokens
+  let estimatedTokens = session.lastPromptTokenCount + session.lastOutputTokenCount;
+  if (estimatedTokens === 0) {
+    estimatedTokens = estimateTokens(session.history);
+  }
+
+  if (estimatedTokens < SUMMARIZATION_THRESHOLD || session.history.length <= KEEP_RECENT_TURNS) {
+    return;
+  }
+
+  // Split history into old (to summarize) and recent (to keep)
+  const splitPoint = session.history.length - KEEP_RECENT_TURNS;
+  const oldHistory = session.history.slice(0, splitPoint);
+  const recentHistory = session.history.slice(splitPoint);
+
+  try {
+    // Generate summary using a non-streaming call
+    const summaryPrompt = `Summarize the following conversation concisely, preserving key facts, user preferences, and any pending context:\n\n${oldHistory.map(h => `${h.role}: ${(h.parts || []).map((p: any) => p.text || JSON.stringify(p)).join(' ')}`).join('\n')}`;
+
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: [{ role: 'user', parts: [{ text: summaryPrompt }] }],
+      config: {
+        systemInstruction: 'You are a conversation summarizer. Produce a concise summary that preserves all important context.',
+      },
+    });
+
+    const summaryText = response.candidates?.[0]?.content?.parts
+      ?.filter((p: any) => p.text)
+      .map((p: any) => p.text)
+      .join('') || '';
+
+    if (summaryText) {
+      session.conversationSummary = summaryText;
+      session.history = [
+        { role: 'user', parts: [{ text: `[Previous conversation summary]: ${summaryText}` }] },
+        { role: 'model', parts: [{ text: 'Understood, I have the context from our previous conversation.' }] },
+        ...recentHistory,
+      ];
+
+      logSessionEvent(tracked, 'history.summarized', {
+        oldTurns: oldHistory.length,
+        keptTurns: recentHistory.length,
+        summaryLength: summaryText.length,
+      });
+    }
+  } catch (err: any) {
+    console.error('[voxglide] History summarization failed:', err.message);
+    logSessionEvent(tracked, 'error', { message: `History summarization failed: ${err.message}` });
+  }
 }
 
 // ── HTTP server ──
@@ -220,9 +307,15 @@ sdkWss.on('connection', (clientWs, req) => {
     id: sessionId,
     pageUrl: origin,
     connectedAt: Date.now(),
+    disconnectedAt: null,
     events: [],
     messageCount: 0,
     disconnected: false,
+    clientWs: clientWs,
+    cleanupTimer: null,
+    pendingToolResultsByTurn: new Map(),
+    turnQueue: [],
+    turnProcessing: false,
   };
   trackedSessions.set(sessionId, tracked);
 
@@ -233,10 +326,6 @@ sdkWss.on('connection', (clientWs, req) => {
   });
 
   console.log(`[voxglide] Client connected: ${sessionId} (active: ${trackedSessions.size})`);
-
-  let pendingToolResultResolve: ((results: any[]) => void) | null = null;
-  let pendingToolResults: any[] = [];
-  let pendingToolCount = 0;
 
   clientWs.on('message', async (raw) => {
     let msg: any;
@@ -250,10 +339,72 @@ sdkWss.on('connection', (clientWs, req) => {
 
     switch (msg.type) {
       case 'session.start': {
+        // Check for session reconnection
+        const requestedId = msg.sessionId;
+        if (requestedId && trackedSessions.has(requestedId) && requestedId !== sessionId) {
+          const existingTracked = trackedSessions.get(requestedId)!;
+
+          // Cancel cleanup timer
+          if (existingTracked.cleanupTimer) {
+            clearTimeout(existingTracked.cleanupTimer);
+            existingTracked.cleanupTimer = null;
+          }
+
+          // Swap WebSocket
+          existingTracked.clientWs = clientWs;
+          existingTracked.disconnected = false;
+          existingTracked.disconnectedAt = null;
+
+          // Update system instruction and tools (page may have changed)
+          if (existingTracked.session) {
+            if (msg.config?.systemInstruction) {
+              existingTracked.session.systemInstruction = msg.config.systemInstruction;
+            }
+            if (msg.config?.tools) {
+              existingTracked.session.tools = msg.config.tools;
+            }
+          }
+
+          // Delete the auto-generated new entry
+          trackedSessions.delete(sessionId);
+
+          // Update page URL
+          if (msg.config?.pageUrl) {
+            existingTracked.pageUrl = msg.config.pageUrl;
+          }
+
+          logSessionEvent(existingTracked, 'session.resumed', {
+            previousSessionId: requestedId,
+            pageUrl: existingTracked.pageUrl,
+          });
+
+          sendToClient(clientWs, {
+            type: 'session.started',
+            sessionId: requestedId,
+            resumed: true,
+          });
+
+          broadcastToAdmins({
+            type: 'session.update',
+            session: getSessionSummary(existingTracked),
+          });
+
+          // Rebind message/close handlers to the existing tracked session
+          // (by reassigning the 'tracked' variable would not work in closure,
+          //  so we close the existing listener setup)
+          // Note: Since we're inside the message handler already, future messages
+          // on this WS will still route correctly because we look up by tracked reference.
+          break;
+        }
+
+        // New session
         tracked.session = {
           history: [],
           systemInstruction: msg.config?.systemInstruction || '',
           tools: msg.config?.tools || [],
+          lastPromptTokenCount: 0,
+          lastOutputTokenCount: 0,
+          conversationSummary: null,
         };
         // Extract page URL from config if available
         if (msg.config?.pageUrl) {
@@ -264,7 +415,7 @@ sdkWss.on('connection', (clientWs, req) => {
           toolCount: tracked.session.tools.length,
           pageUrl: tracked.pageUrl,
         });
-        sendToClient(clientWs, { type: 'session.started' });
+        sendToClient(clientWs, { type: 'session.started', sessionId: tracked.id });
         // Update admins with potentially new pageUrl
         broadcastToAdmins({
           type: 'session.update',
@@ -274,58 +425,93 @@ sdkWss.on('connection', (clientWs, req) => {
       }
 
       case 'text': {
-        if (!tracked.session) {
+        // Find the correct tracked session for this ws
+        const activeTracked = findTrackedByWs(clientWs) || tracked;
+        if (!activeTracked.session) {
           sendToClient(clientWs, { type: 'error', message: 'No active session. Send session.start first.' });
-          logSessionEvent(tracked, 'error', { message: 'Text sent without active session' });
+          logSessionEvent(activeTracked, 'error', { message: 'Text sent without active session' });
           return;
         }
 
         const userText = msg.text;
         if (!userText) return;
 
-        tracked.messageCount++;
-        logSessionEvent(tracked, 'text', { text: userText });
+        activeTracked.messageCount++;
+        logSessionEvent(activeTracked, 'text', { text: userText });
 
-        tracked.session.history.push({ role: 'user', parts: [{ text: userText }] });
+        // Push to history immediately to preserve arrival order
+        activeTracked.session.history.push({ role: 'user', parts: [{ text: userText }] });
 
-        try {
-          await handleTurn(tracked.session, clientWs, waitForToolResults, tracked);
-        } catch (err: any) {
-          sendToClient(clientWs, { type: 'error', message: err.message });
-          logSessionEvent(tracked, 'error', { message: err.message });
-        }
+        // Enqueue the LLM turn so concurrent messages are serialized
+        const turnSession = activeTracked.session;
+        enqueueTurn(activeTracked, async () => {
+          const turnId = crypto.randomUUID();
+          try {
+            await maybeSummarizeHistory(turnSession, activeTracked);
+            await handleTurnStreaming(turnSession, clientWs, activeTracked, turnId);
+          } catch (err: any) {
+            sendToClient(clientWs, { type: 'error', message: err.message });
+            logSessionEvent(activeTracked, 'error', { message: err.message });
+          }
+        });
         break;
       }
 
       case 'toolResult': {
+        const activeTracked = findTrackedByWs(clientWs) || tracked;
         const responses = msg.functionResponses || [];
-        logSessionEvent(tracked, 'toolResult', { responses });
-        pendingToolResults.push(...responses);
-        if (pendingToolResults.length >= pendingToolCount && pendingToolResultResolve) {
-          pendingToolResultResolve(pendingToolResults);
-          pendingToolResultResolve = null;
-          pendingToolResults = [];
-          pendingToolCount = 0;
+        logSessionEvent(activeTracked, 'toolResult', { responses, turnId: msg.turnId });
+
+        // Route by turnId, fallback to first pending entry for backward compat
+        let pending: PendingToolTurn | undefined;
+        if (msg.turnId && activeTracked.pendingToolResultsByTurn.has(msg.turnId)) {
+          pending = activeTracked.pendingToolResultsByTurn.get(msg.turnId);
+        } else if (activeTracked.pendingToolResultsByTurn.size > 0) {
+          // Backward compat: old clients without turnId — use first pending entry
+          const firstKey = activeTracked.pendingToolResultsByTurn.keys().next().value as string;
+          pending = activeTracked.pendingToolResultsByTurn.get(firstKey);
+          // Use the actual key for cleanup
+          if (pending) msg.turnId = firstKey;
         }
+
+        if (pending) {
+          pending.results.push(...responses);
+          if (pending.results.length >= pending.expectedCount) {
+            pending.resolve(pending.results);
+            activeTracked.pendingToolResultsByTurn.delete(msg.turnId);
+          }
+        }
+        break;
+      }
+
+      case 'tool.progress': {
+        const activeTracked = findTrackedByWs(clientWs) || tracked;
+        logSessionEvent(activeTracked, 'tool.progress', {
+          toolName: msg.toolName,
+          status: msg.status,
+          callId: msg.callId,
+        });
         break;
       }
 
       case 'scan': {
-        logSessionEvent(tracked, 'scan', msg.data || {});
+        const activeTracked = findTrackedByWs(clientWs) || tracked;
+        logSessionEvent(activeTracked, 'scan', msg.data || {});
         break;
       }
 
       case 'context.update': {
-        if (!tracked.session) {
+        const activeTracked = findTrackedByWs(clientWs) || tracked;
+        if (!activeTracked.session) {
           sendToClient(clientWs, { type: 'error', message: 'No active session. Send session.start first.' });
-          logSessionEvent(tracked, 'error', { message: 'context.update sent without active session' });
+          logSessionEvent(activeTracked, 'error', { message: 'context.update sent without active session' });
           return;
         }
         const newContext = msg.context || msg.systemInstruction;
         if (newContext) {
-          tracked.session.systemInstruction = newContext;
+          activeTracked.session.systemInstruction = newContext;
         }
-        logSessionEvent(tracked, 'context.update', {
+        logSessionEvent(activeTracked, 'context.update', {
           systemInstruction: newContext || '',
           ...(msg.data || {}),
         });
@@ -334,8 +520,9 @@ sdkWss.on('connection', (clientWs, req) => {
       }
 
       case 'session.stop': {
-        tracked.session = null;
-        logSessionEvent(tracked, 'session.stop', {});
+        const activeTracked = findTrackedByWs(clientWs) || tracked;
+        activeTracked.session = null;
+        logSessionEvent(activeTracked, 'session.stop', {});
         sendToClient(clientWs, { type: 'session.stopped' });
         break;
       }
@@ -346,99 +533,172 @@ sdkWss.on('connection', (clientWs, req) => {
     }
   });
 
-  function waitForToolResults(expectedCount: number): Promise<any[]> {
-    pendingToolResults = [];
-    pendingToolCount = expectedCount;
-    return new Promise((resolve, reject) => {
-      pendingToolResultResolve = resolve;
-      setTimeout(() => {
-        if (pendingToolResultResolve) {
-          pendingToolResultResolve = null;
-          reject(new Error('Tool result timeout'));
-        }
-      }, 30000);
-    });
-  }
-
   clientWs.on('close', () => {
-    tracked.session = null;
-    tracked.disconnected = true;
-    logSessionEvent(tracked, 'session.stop', { reason: 'disconnected' });
+    const activeTracked = findTrackedByWs(clientWs) || tracked;
+
+    // Keep session intact for reconnection (do NOT null it)
+    activeTracked.disconnected = true;
+    activeTracked.disconnectedAt = Date.now();
+    activeTracked.clientWs = null;
+
+    // Clear turn queue and pending tool results to avoid processing stale turns
+    activeTracked.turnQueue.length = 0;
+    activeTracked.turnProcessing = false;
+    activeTracked.pendingToolResultsByTurn.clear();
+
+    logSessionEvent(activeTracked, 'session.disconnected', { reason: 'disconnected' });
     broadcastToAdmins({
       type: 'session.disconnected',
-      sessionId: tracked.id,
+      sessionId: activeTracked.id,
     });
-    console.log(`[voxglide] Client disconnected: ${sessionId} (active: ${Array.from(trackedSessions.values()).filter(s => !s.disconnected).length})`);
-    // Keep tracked session for admin review; clean up after 10 minutes
-    setTimeout(() => {
-      trackedSessions.delete(sessionId);
-    }, 10 * 60 * 1000);
+
+    console.log(`[voxglide] Client disconnected: ${activeTracked.id} (active: ${Array.from(trackedSessions.values()).filter(s => !s.disconnected).length})`);
+
+    // Clean up after 30 minutes if not reconnected
+    activeTracked.cleanupTimer = setTimeout(() => {
+      trackedSessions.delete(activeTracked.id);
+    }, SESSION_CLEANUP_MS);
   });
 
   clientWs.on('error', (err) => {
     console.error('[voxglide] Client WebSocket error:', err.message);
-    logSessionEvent(tracked, 'error', { message: err.message });
-    tracked.session = null;
+    const activeTracked = findTrackedByWs(clientWs) || tracked;
+    logSessionEvent(activeTracked, 'error', { message: err.message });
   });
 });
 
-// ── Gemini turn handling ──
+// ── Helper: find tracked session by websocket ──
 
-async function handleTurn(
+function findTrackedByWs(ws: WebSocket): TrackedSession | null {
+  for (const tracked of trackedSessions.values()) {
+    if (tracked.clientWs === ws) return tracked;
+  }
+  return null;
+}
+
+// ── Turn Queue: serial execution of LLM turns per session ──
+
+function enqueueTurn(tracked: TrackedSession, fn: () => Promise<void>): void {
+  tracked.turnQueue.push(fn);
+  if (!tracked.turnProcessing) {
+    processTurnQueue(tracked);
+  }
+}
+
+async function processTurnQueue(tracked: TrackedSession): Promise<void> {
+  tracked.turnProcessing = true;
+  while (tracked.turnQueue.length > 0) {
+    const fn = tracked.turnQueue.shift()!;
+    try {
+      await fn();
+    } catch (err: any) {
+      console.error('[voxglide] Turn queue error:', err.message);
+      logSessionEvent(tracked, 'error', { message: `Turn queue error: ${err.message}` });
+    }
+  }
+  tracked.turnProcessing = false;
+}
+
+// ── Helper: create waitForToolResults for a tracked session (turn-scoped) ──
+
+function waitForToolResults(tracked: TrackedSession, expectedCount: number, turnId: string): Promise<any[]> {
+  return new Promise((resolve, reject) => {
+    tracked.pendingToolResultsByTurn.set(turnId, {
+      resolve,
+      results: [],
+      expectedCount,
+    });
+    setTimeout(() => {
+      if (tracked.pendingToolResultsByTurn.has(turnId)) {
+        tracked.pendingToolResultsByTurn.delete(turnId);
+        reject(new Error('Tool result timeout'));
+      }
+    }, 30000);
+  });
+}
+
+// ── Streaming Gemini turn handling ──
+
+async function handleTurnStreaming(
   session: Session,
   clientWs: WebSocket,
-  waitForToolResults: (count: number) => Promise<any[]>,
   tracked: TrackedSession,
+  turnId: string,
 ): Promise<void> {
   const config: GenerateContentConfig = {
     systemInstruction: session.systemInstruction,
     tools: session.tools,
   };
 
-  const response = await ai.models.generateContent({
+  const stream = await ai.models.generateContentStream({
     model: GEMINI_MODEL,
     contents: session.history,
     config,
   });
 
-  // Extract usage
-  if (response.usageMetadata) {
+  let accumulatedText = '';
+  const functionCalls: any[] = [];
+  const allParts: any[] = [];
+  let usageMetadata: any = null;
+
+  try {
+    for await (const chunk of stream) {
+      // Check client still connected
+      if (clientWs.readyState !== WebSocket.OPEN) {
+        if (allParts.length > 0) {
+          session.history.push({ role: 'model', parts: allParts });
+        }
+        return;
+      }
+
+      if (chunk.usageMetadata) usageMetadata = chunk.usageMetadata;
+
+      for (const part of chunk.candidates?.[0]?.content?.parts || []) {
+        allParts.push(part);
+        if (part.text) {
+          accumulatedText += part.text;
+          sendToClient(clientWs, { type: 'response.delta', text: part.text });
+        }
+        if (part.functionCall) {
+          functionCalls.push(part);
+        }
+      }
+    }
+  } catch (err: any) {
+    // Save partial history on stream error
+    if (allParts.length > 0) {
+      session.history.push({ role: 'model', parts: allParts });
+    }
+    throw err;
+  }
+
+  // Send usage
+  if (usageMetadata) {
+    session.lastPromptTokenCount = usageMetadata.promptTokenCount || 0;
+    session.lastOutputTokenCount = usageMetadata.candidatesTokenCount || 0;
     sendToClient(clientWs, {
       type: 'usage',
-      totalTokens: response.usageMetadata.totalTokenCount || 0,
-      inputTokens: response.usageMetadata.promptTokenCount || 0,
-      outputTokens: response.usageMetadata.candidatesTokenCount || 0,
+      totalTokens: usageMetadata.totalTokenCount || 0,
+      inputTokens: usageMetadata.promptTokenCount || 0,
+      outputTokens: usageMetadata.candidatesTokenCount || 0,
     });
   }
 
-  const candidate = response.candidates?.[0];
-  if (!candidate?.content?.parts) {
-    sendToClient(clientWs, { type: 'error', message: 'No response from model' });
-    logSessionEvent(tracked, 'error', { message: 'No response from model' });
-    return;
-  }
-
-  const parts = candidate.content.parts;
-
-  // Check for function calls
-  const functionCalls = parts.filter((p: any) => p.functionCall);
-
   if (functionCalls.length > 0) {
-    // Add model's response (with function calls) to history
-    session.history.push({ role: 'model', parts });
+    session.history.push({ role: 'model', parts: allParts });
 
     // Send tool calls to client and wait for results
     const fcs = functionCalls.map((p: any) => ({
-      id: p.functionCall.name + '_' + Date.now(),
+      id: crypto.randomUUID(),
       name: p.functionCall.name,
       args: p.functionCall.args || {},
     }));
 
-    sendToClient(clientWs, { type: 'toolCall', functionCalls: fcs });
-    logSessionEvent(tracked, 'toolCall', { functionCalls: fcs });
+    sendToClient(clientWs, { type: 'toolCall', functionCalls: fcs, turnId });
+    logSessionEvent(tracked, 'toolCall', { functionCalls: fcs, turnId });
 
     // Wait for tool results from client
-    const results = await waitForToolResults(fcs.length);
+    const results = await waitForToolResults(tracked, fcs.length, turnId);
 
     // Add tool results to history
     const functionResponseParts = results.map((r: any) => ({
@@ -450,22 +710,14 @@ async function handleTurn(
     session.history.push({ role: 'user', parts: functionResponseParts });
 
     // Get the model's follow-up response with tool results
-    await handleTurn(session, clientWs, waitForToolResults, tracked);
+    await handleTurnStreaming(session, clientWs, tracked, turnId);
   } else {
-    // Regular text response
-    const textParts = parts.filter((p: any) => p.text);
-    const responseText = textParts.map((p: any) => p.text).join('');
+    session.history.push({ role: 'model', parts: allParts });
 
-    // Add to history
-    session.history.push({ role: 'model', parts });
-
-    // Send to client
-    if (responseText) {
-      sendToClient(clientWs, {
-        type: 'response',
-        text: responseText,
-      });
-      logSessionEvent(tracked, 'response', { text: responseText });
+    // Send final response (backward compatible — old clients see type:'response')
+    if (accumulatedText) {
+      sendToClient(clientWs, { type: 'response', text: accumulatedText });
+      logSessionEvent(tracked, 'response', { text: accumulatedText });
     }
   }
 }

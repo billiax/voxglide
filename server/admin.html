@@ -228,6 +228,48 @@
   }
   .event-item.error .event-label { background: #3d1f1f; color: #f85149; }
 
+  .event-item.response\.delta {
+    border-left-color: #56d364;
+    background: #0d2818;
+  }
+  .event-item.response\.delta .event-label { background: #1b4332; color: #56d364; }
+
+  .event-item.history\.summarized {
+    border-left-color: #ffa657;
+    background: #2a1a0a;
+  }
+  .event-item.history\.summarized .event-label { background: #3d2a14; color: #ffa657; }
+
+  .event-item.tool\.progress {
+    border-left-color: #bc8cff;
+    background: #1a0d2e;
+  }
+  .event-item.tool\.progress .event-label { background: #2d1b4e; color: #bc8cff; }
+
+  .event-item.session\.resumed {
+    border-left-color: #58a6ff;
+    background: #0d1f3c;
+  }
+  .event-item.session\.resumed .event-label { background: #1a3a5c; color: #58a6ff; }
+
+  .event-item.session\.disconnected {
+    border-left-color: #8b949e;
+    background: #161b22;
+  }
+  .event-item.session\.disconnected .event-label { background: #21262d; color: #8b949e; }
+
+  .tool-progress-status {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+  .tool-progress-status.executing { background: #1a3a5c; color: #58a6ff; }
+  .tool-progress-status.completed { background: #1b4332; color: #3fb950; }
+  .tool-progress-status.failed { background: #3d1f1f; color: #f85149; }
+
   .event-content {
     margin-top: 4px;
     font-size: 13px;
@@ -599,6 +641,23 @@
       case 'session.stop':
         content = event.data.reason === 'disconnected' ? 'Client disconnected' : 'Session stopped';
         break;
+      case 'tool.progress':
+        content = '<span class="tool-name">' + escapeHtml(event.data.toolName || '') + '</span>' +
+          '<span class="tool-progress-status ' + (event.data.status || '') + '">' + escapeHtml(event.data.status || '') + '</span>';
+        break;
+      case 'history.summarized':
+        content = 'History summarized: <strong>' + (event.data.oldTurns || 0) + '</strong> old turns compressed, ' +
+          '<strong>' + (event.data.keptTurns || 0) + '</strong> recent turns kept. ' +
+          'Summary: ' + (event.data.summaryLength || 0) + ' chars';
+        break;
+      case 'session.resumed':
+        content = 'Session resumed (reconnected)';
+        if (event.data.pageUrl) content += ' | ' + escapeHtml(event.data.pageUrl);
+        break;
+      case 'session.disconnected':
+        content = 'Client disconnected';
+        if (event.data.reason) content += ' (' + escapeHtml(event.data.reason) + ')';
+        break;
       case 'error':
         content = escapeHtml(event.data.message || JSON.stringify(event.data));
         break;
@@ -731,6 +790,11 @@
       'context.update': 'CONTEXT',
       'session.start': 'START',
       'session.stop': 'STOP',
+      'session.resumed': 'RESUMED',
+      'session.disconnected': 'DISCONNECTED',
+      'tool.progress': 'TOOL STATUS',
+      'history.summarized': 'SUMMARIZED',
+      'response.delta': 'DELTA',
       'error': 'ERROR',
     };
     return labels[type] || type.toUpperCase();
