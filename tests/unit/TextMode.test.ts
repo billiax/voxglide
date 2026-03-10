@@ -41,6 +41,9 @@ vi.mock('../../src/ui/UIManager', () => {
     showToolStatus = vi.fn();
     removeToolStatus = vi.fn();
     focusInput = vi.fn();
+    setAIThinking = vi.fn();
+    restoreTranscript = vi.fn();
+    setDisconnectHandler = vi.fn();
     constructor(public config: any, public onToggle: any, public onSendText?: any, public inputMode?: string) {}
   }
   return { UIManager: MockUIManager };
@@ -63,6 +66,7 @@ vi.mock('../../src/actions/NavigationHandler', () => {
     setSessionId = vi.fn();
     static getPendingReconnect = vi.fn().mockReturnValue(null);
     static clearPendingReconnect = vi.fn();
+    static consumePendingReconnect = vi.fn();
   }
   return { NavigationHandler: MockNavigationHandler };
 });
