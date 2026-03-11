@@ -52,6 +52,41 @@ server/
   index.ts              - WebSocket proxy server (Node.js + ws)
   package.json          - Server deps (@google/genai, ws, tsx)
   tsconfig.json         - Server TS config
+  admin/                - Admin dashboard (single-page app, served at /admin)
+    index.html          - Shell HTML: header, sidebar, main area with Events/Analysis tabs
+    css/
+      base.css          - Theme system (CSS custom properties, dark default + [data-theme="light"]),
+                           reset, layout grid, scrollbar styling
+      components.css    - Header, sidebar session list, main area, tab bar, theme toggle button
+      events.css        - Event items (color-coded by type), filter bar toggles, event groups
+                           (tool-group, nav-group, scan-group), collapsible bodies, context panels
+      analysis.css      - Session summary card, vertical page journey, element groups (collapsible),
+                           element cards with capability badges, form field data tables, heading tree,
+                           search bar with highlighting, cross-scan search results
+    js/
+      app.js            - Entry point: imports all modules, initializes theme, wires tab switching,
+                           auto-scroll detection, starts WebSocket connection
+      state.js          - Shared mutable state (sessions Map, selected session, filters, theme,
+                           active tab, scan index), renderer registry, cached DOM refs
+      utils.js          - Shared helpers: escapeHtml, formatTime, formatElapsed, formatDuration,
+                           truncateStr, eventLabel, scrollToBottom, chevronIcon
+      theme.js          - Theme manager: auto/light/dark cycling with localStorage persistence,
+                           listens to prefers-color-scheme media query, toggle button with SVG icons
+      websocket.js      - WebSocket client to /admin endpoint, handles sessions.list, session.new,
+                           session.update, session.event, session.disconnected messages
+      sidebar.js        - Session list rendering (URL pathname as primary text, session ID demoted,
+                           live/dead colored dots, red left border for disconnected), session selection
+      events.js         - Events tab: filter bar (User/AI/Tools/Scans/System toggles with counts),
+                           event grouping (tool sequences by turnId, navigation sequences,
+                           duplicate scan collapse), incremental append into existing groups,
+                           color-coded event items, collapsible context panels
+      analysis.js       - Page Analysis tab: session summary card (horizontal stats bar),
+                           vertical page journey (grouped by URL, clickable to switch scan),
+                           interactive elements grouped by UX category (Buttons, Links/Navigation,
+                           Switches/Toggles, Form Controls, Other) in collapsible groups with
+                           capability badges, form fields table, page outline/headings tree,
+                           smart search bar with instant filtering, text highlighting,
+                           cross-scan search, and "not found in any scan" detection
 ```
 
 ### Other
