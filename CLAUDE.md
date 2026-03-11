@@ -52,6 +52,41 @@ server/
   index.ts              - WebSocket proxy server (Node.js + ws)
   package.json          - Server deps (@google/genai, ws, tsx)
   tsconfig.json         - Server TS config
+  admin/                - Admin dashboard (single-page app, served at /admin)
+    index.html          - Shell HTML: header, sidebar, main area with Events/Analysis tabs
+    css/
+      base.css          - Theme system (CSS custom properties, dark default + [data-theme="light"]),
+                           reset, layout grid, scrollbar styling
+      components.css    - Header, sidebar session list, main area, tab bar, theme toggle button
+      events.css        - Event items (color-coded by type), filter bar toggles, event groups
+                           (tool-group, nav-group, scan-group), collapsible bodies, context panels
+      analysis.css      - Session summary card, vertical page journey, element groups (collapsible),
+                           element cards with capability badges, form field data tables, heading tree,
+                           search bar with highlighting, cross-scan search results
+    js/
+      app.js            - Entry point: imports all modules, initializes theme, wires tab switching,
+                           auto-scroll detection, starts WebSocket connection
+      state.js          - Shared mutable state (sessions Map, selected session, filters, theme,
+                           active tab, scan index), renderer registry, cached DOM refs
+      utils.js          - Shared helpers: escapeHtml, formatTime, formatElapsed, formatDuration,
+                           truncateStr, eventLabel, scrollToBottom, chevronIcon
+      theme.js          - Theme manager: auto/light/dark cycling with localStorage persistence,
+                           listens to prefers-color-scheme media query, toggle button with SVG icons
+      websocket.js      - WebSocket client to /admin endpoint, handles sessions.list, session.new,
+                           session.update, session.event, session.disconnected messages
+      sidebar.js        - Session list rendering (URL pathname as primary text, session ID demoted,
+                           live/dead colored dots, red left border for disconnected), session selection
+      events.js         - Events tab: filter bar (User/AI/Tools/Scans/System toggles with counts),
+                           event grouping (tool sequences by turnId, navigation sequences,
+                           duplicate scan collapse), incremental append into existing groups,
+                           color-coded event items, collapsible context panels
+      analysis.js       - Page Analysis tab: session summary card (horizontal stats bar),
+                           vertical page journey (grouped by URL, clickable to switch scan),
+                           interactive elements grouped by UX category (Buttons, Links/Navigation,
+                           Switches/Toggles, Form Controls, Other) in collapsible groups with
+                           capability badges, form fields table, page outline/headings tree,
+                           smart search bar with instant filtering, text highlighting,
+                           cross-scan search, and "not found in any scan" detection
 ```
 
 ### Other
@@ -90,17 +125,14 @@ tests/
 ## Build & Development
 
 ### Running the Dev Environment
-The user runs the app themselves outside of Claude Code using `start-dev-hot-reload.sh`. **Do not start or restart the dev server** — it is always running in a separate terminal.
+The user runs the app themselves outside of Claude Code using `start-dev.sh`. **Do not start or restart the dev server** — it is always running in a separate terminal.
 
-The hot-reload script (`./start-dev-hot-reload.sh`) does the following:
-1. Loads `GEMINI_API_KEY` from `.env` (or environment)
-2. Builds the SDK (`npm run build`)
-3. Starts the server (`cd server && npx tsx index.ts`) on port 3100
-4. Starts the Cloudflare tunnel (`voxglide.nextbt.ai`) if not already running
-5. Watches `src/` and `server/` using `inotifywait` for file changes
-6. On change: waits 3s cooldown for changes to settle, rebuilds SDK, restarts server
+The dev script (`./start-dev.sh`) runs two independent watchers:
+1. **SDK watcher** (`rollup --watch`) — rebuilds `dist/` when `src/` changes. The server serves SDK files from disk on each request, so no server restart needed.
+2. **Server watcher** (`tsx watch`) — restarts only the server when `server/` files change.
+3. Starts the Cloudflare tunnel (`voxglide.nextbt.ai`) if configured.
 
-This means any file changes you make to `src/` or `server/` will automatically trigger a rebuild and server restart. No manual intervention needed.
+This means `src/` changes only trigger a fast SDK rebuild (no server restart), and `server/` changes only restart the server (no SDK rebuild).
 
 ### Client SDK
 ```bash

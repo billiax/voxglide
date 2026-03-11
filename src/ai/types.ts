@@ -16,6 +16,7 @@ export interface ProxySessionCallbacks {
   onSessionEnd: (usage: TokenUsage) => void;
   onTokenUpdate: (usage: TokenUsage) => void;
   onDebug: (event: DebugEvent) => void;
+  onSpeechStateChange?: (active: boolean, paused: boolean) => void;
 }
 
 export interface TokenUsage {

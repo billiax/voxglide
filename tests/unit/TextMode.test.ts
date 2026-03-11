@@ -18,6 +18,7 @@ vi.mock('../../src/ai/ProxySession', () => {
     isConnected = vi.fn().mockReturnValue(false);
     pauseSpeech = vi.fn();
     resumeSpeech = vi.fn();
+    retrySpeech = vi.fn();
     sessionId: string | null = 'test-session-id';
     sendText = vi.fn();
     sendContextUpdate = vi.fn();
@@ -31,6 +32,7 @@ vi.mock('../../src/ai/ProxySession', () => {
 vi.mock('../../src/ui/UIManager', () => {
   class MockUIManager {
     setConnectionState = vi.fn();
+    setSpeechState = vi.fn();
     addTranscript = vi.fn();
     clearTranscript = vi.fn();
     showTranscript = vi.fn();
@@ -44,6 +46,7 @@ vi.mock('../../src/ui/UIManager', () => {
     setAIThinking = vi.fn();
     restoreTranscript = vi.fn();
     setDisconnectHandler = vi.fn();
+    ensureAttached = vi.fn();
     constructor(public config: any, public onToggle: any, public onSendText?: any, public inputMode?: string) {}
   }
   return { UIManager: MockUIManager };
@@ -56,6 +59,7 @@ vi.mock('../../src/context/PageContextProvider', () => {
     getContext = vi.fn().mockResolvedValue({ content: '', tools: [] });
     destroy = vi.fn();
     markDirty = vi.fn();
+    getScanner = vi.fn().mockReturnValue({ getElementByIndex: vi.fn().mockReturnValue(null) });
   }
   return { PageContextProvider: MockPageContextProvider };
 });
@@ -71,11 +75,22 @@ vi.mock('../../src/actions/NavigationHandler', () => {
   return { NavigationHandler: MockNavigationHandler };
 });
 
+vi.mock('../../src/NavigationObserver', () => {
+  class MockNavigationObserver {
+    destroy = vi.fn();
+    constructor(public onNavigate: any, public onBeforeUnload: any) {}
+  }
+  return { NavigationObserver: MockNavigationObserver };
+});
+
 vi.mock('../../src/actions/DOMActions', () => ({
   fillField: vi.fn().mockResolvedValue({ result: 'ok' }),
   clickElement: vi.fn().mockResolvedValue({ result: 'ok' }),
   readContent: vi.fn().mockResolvedValue({ result: 'ok' }),
   invalidateElementCache: vi.fn(),
+  setIndexResolver: vi.fn(),
+  setRescanCallback: vi.fn(),
+  setPostClickCallback: vi.fn(),
 }));
 
 const baseConfig = { serverUrl: 'ws://localhost:3100' } as const;
@@ -147,12 +162,24 @@ describe('Text Mode', () => {
       expect(proxySessionInstances[0].config.speechEnabled).toBe(true);
     });
 
-    it('toggle while connected disconnects', async () => {
+    it('toggle while connected and speech active disconnects', async () => {
       await sdk.start();
       proxySessionInstances[0].callbacks.onStatusChange('connected');
+      proxySessionInstances[0].callbacks.onSpeechStateChange(true, false);
 
       await sdk.toggle();
       expect(sdk.getConnectionState()).toBe(ConnectionState.DISCONNECTED);
+    });
+
+    it('toggle while connected but speech inactive retries speech', async () => {
+      await sdk.start();
+      const session = proxySessionInstances[0];
+      session.callbacks.onStatusChange('connected');
+      // Speech failed — speechCurrentlyActive remains false
+
+      await sdk.toggle();
+      expect(sdk.getConnectionState()).toBe(ConnectionState.CONNECTED);
+      expect(session.retrySpeech).toHaveBeenCalled();
     });
   });
 

@@ -51,6 +51,8 @@ export class ProxySession {
       try {
         this.debug({ direction: 'info', kind: 'connection', payload: { url: this.config.serverUrl } });
 
+        let settled = false;
+
         this.ws = new WebSocket(this.config.serverUrl);
 
         this.ws.onopen = () => {
@@ -63,6 +65,7 @@ export class ProxySession {
             config: {
               systemInstruction: this.config.systemInstruction,
               tools: this.config.tools,
+              pageUrl: typeof window !== 'undefined' ? window.location.href : undefined,
             },
           });
         };
@@ -76,18 +79,22 @@ export class ProxySession {
           }
 
           this.debug({ direction: 'recv', kind: msg.type, payload: msg });
-          this.handleMessage(msg, resolve);
+          this.handleMessage(msg, () => {
+            if (!settled) { settled = true; resolve(); }
+          });
         };
 
         this.ws.onclose = () => {
           this.debug({ direction: 'recv', kind: 'session', payload: { event: 'close' } });
           this.callbacks.onStatusChange('disconnected');
+          // Reject if WS closed before session.started was received
+          if (!settled) { settled = true; reject(new Error('WebSocket closed before session started')); }
         };
 
         this.ws.onerror = (err) => {
           this.debug({ direction: 'error', kind: 'session', payload: { error: err } });
           this.callbacks.onError('WebSocket connection error');
-          reject(new Error('WebSocket connection error'));
+          if (!settled) { settled = true; reject(new Error('WebSocket connection error')); }
         };
       } catch (err: any) {
         reject(err);
@@ -146,10 +153,77 @@ export class ProxySession {
         this.callbacks.onStatusChange('disconnected');
         break;
 
+      case 'screenshot.request':
+        this.captureAndSendScreenshot(msg.requestId);
+        break;
+
       case 'error':
         this.callbacks.onError(msg.message || 'Server error');
         break;
     }
+  }
+
+  // ── Screenshot capture (non-blocking, for admin monitoring) ──
+
+  private screenshotInProgress = false;
+
+  /**
+   * Capture a screenshot and send it to the server. Non-blocking (fire-and-forget).
+   * Skips if a capture is already in progress. Used both for automatic captures
+   * (page changes) and on-demand requests from the admin dashboard.
+   */
+  captureAndSendScreenshot(requestId?: string): void {
+    if (this.screenshotInProgress) return;
+    this.screenshotInProgress = true;
+
+    this.doScreenshotCapture(requestId).finally(() => {
+      this.screenshotInProgress = false;
+    });
+  }
+
+  private async doScreenshotCapture(requestId?: string): Promise<void> {
+    try {
+      const html2canvas = await this.loadHtml2Canvas();
+      if (!html2canvas) {
+        if (requestId) {
+          this.send({ type: 'screenshot.error', error: 'Failed to load screenshot library', requestId });
+        }
+        return;
+      }
+      const canvas = await html2canvas(document.body, {
+        logging: false,
+        useCORS: true,
+        allowTaint: true,
+        scale: window.devicePixelRatio > 1 ? 0.5 : 0.75,
+        windowWidth: Math.min(document.documentElement.clientWidth, 1440),
+        windowHeight: Math.min(document.documentElement.clientHeight, 900),
+      });
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      const base64 = dataUrl.split(',')[1];
+      this.send({ type: 'screenshot', image: base64, url: window.location.href, requestId });
+    } catch (err: any) {
+      if (requestId) {
+        this.send({ type: 'screenshot.error', error: err.message || 'Screenshot capture failed', requestId });
+      }
+    }
+  }
+
+  private async loadHtml2Canvas(): Promise<any> {
+    if ((window as any).html2canvas) return (window as any).html2canvas;
+
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+      script.onload = () => resolve((window as any).html2canvas);
+      script.onerror = () => resolve(null);
+      document.head.appendChild(script);
+    });
+  }
+
+  private notifySpeechState(): void {
+    const active = this.speechCapture?.isRunning() ?? false;
+    const paused = this.speechCapture?.isPaused() ?? false;
+    this.callbacks.onSpeechStateChange?.(active, paused);
   }
 
   private startSpeechCapture(): void {
@@ -166,8 +240,10 @@ export class ProxySession {
       },
       (listening) => {
         this.debug({ direction: 'info', kind: 'speech', payload: { listening } });
+        this.notifySpeechState();
       },
     );
+    this.notifySpeechState();
   }
 
   /**
@@ -306,6 +382,7 @@ export class ProxySession {
     if (this.speechCapture) {
       this.speechCapture.stop();
       this.speechCapture = null;
+      this.notifySpeechState();
     }
 
     // Clear send queue — stale messages should not be sent on next connection
@@ -368,6 +445,7 @@ export class ProxySession {
   pauseSpeech(): void {
     this.ttsPaused = true;
     this.speechCapture?.pause();
+    this.notifySpeechState();
   }
 
   /**
@@ -379,6 +457,7 @@ export class ProxySession {
     if (!this.textInputActive) {
       this.speechCapture?.resume();
     }
+    this.notifySpeechState();
   }
 
   /**
@@ -387,6 +466,7 @@ export class ProxySession {
   pauseSpeechForTextInput(): void {
     this.textInputActive = true;
     this.speechCapture?.pause();
+    this.notifySpeechState();
   }
 
   /**
@@ -398,6 +478,23 @@ export class ProxySession {
     if (!this.ttsPaused) {
       this.speechCapture?.resume();
     }
+    this.notifySpeechState();
+  }
+
+  /**
+   * Retry speech recognition (e.g. after a user gesture when auto-start failed).
+   * Resets recovery state and attempts immediately.
+   */
+  retrySpeech(): void {
+    if (!this.speechCapture) {
+      // Speech was never started or config disabled it — start fresh
+      if (this.config.speechEnabled) {
+        this.startSpeechCapture();
+      }
+      return;
+    }
+    this.speechCapture.retrySpeech();
+    this.notifySpeechState();
   }
 
   isConnected(): boolean {

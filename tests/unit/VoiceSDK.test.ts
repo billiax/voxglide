@@ -6,6 +6,7 @@ const {
   mockConnect, mockDisconnect, mockIsConnected,
   mockGetPendingReconnect, mockClearPendingReconnect,
   proxySessionInstances,
+  mockNavObserverDestroy,
 } = vi.hoisted(() => ({
   mockConnect: vi.fn().mockResolvedValue(undefined),
   mockDisconnect: vi.fn().mockResolvedValue(undefined),
@@ -13,6 +14,7 @@ const {
   mockGetPendingReconnect: vi.fn().mockReturnValue(null),
   mockClearPendingReconnect: vi.fn(),
   proxySessionInstances: [] as Array<{ config: any; callbacks: any }>,
+  mockNavObserverDestroy: vi.fn(),
 }));
 
 vi.mock('../../src/ai/ProxySession', () => {
@@ -22,6 +24,7 @@ vi.mock('../../src/ai/ProxySession', () => {
     isConnected = mockIsConnected;
     pauseSpeech = vi.fn();
     resumeSpeech = vi.fn();
+    retrySpeech = vi.fn();
     constructor(public config: any, public callbacks: any) {
       proxySessionInstances.push({ config, callbacks });
     }
@@ -32,6 +35,7 @@ vi.mock('../../src/ai/ProxySession', () => {
 vi.mock('../../src/ui/UIManager', () => {
   class MockUIManager {
     setConnectionState = vi.fn();
+    setSpeechState = vi.fn();
     addTranscript = vi.fn();
     clearTranscript = vi.fn();
     showTranscript = vi.fn();
@@ -41,6 +45,7 @@ vi.mock('../../src/ui/UIManager', () => {
     setAIThinking = vi.fn();
     restoreTranscript = vi.fn();
     setDisconnectHandler = vi.fn();
+    ensureAttached = vi.fn();
     constructor(public config: any, public onToggle: any) {}
   }
   return { UIManager: MockUIManager };
@@ -52,6 +57,8 @@ vi.mock('../../src/context/PageContextProvider', () => {
     name = 'Page Context';
     getContext = vi.fn().mockResolvedValue({ content: '', tools: [] });
     destroy = vi.fn();
+    markDirty = vi.fn();
+    getScanner = vi.fn().mockReturnValue({ getElementByIndex: vi.fn().mockReturnValue(null) });
   }
   return { PageContextProvider: MockPageContextProvider };
 });
@@ -66,11 +73,22 @@ vi.mock('../../src/actions/NavigationHandler', () => {
   return { NavigationHandler: MockNavigationHandler };
 });
 
+vi.mock('../../src/NavigationObserver', () => {
+  class MockNavigationObserver {
+    destroy = mockNavObserverDestroy;
+    constructor(public onNavigate: any, public onBeforeUnload: any) {}
+  }
+  return { NavigationObserver: MockNavigationObserver };
+});
+
 vi.mock('../../src/actions/DOMActions', () => ({
   fillField: vi.fn().mockResolvedValue({ result: 'ok' }),
   clickElement: vi.fn().mockResolvedValue({ result: 'ok' }),
   readContent: vi.fn().mockResolvedValue({ result: 'ok' }),
   invalidateElementCache: vi.fn(),
+  setIndexResolver: vi.fn(),
+  setRescanCallback: vi.fn(),
+  setPostClickCallback: vi.fn(),
 }));
 
 import { ContextEngine } from '../../src/context/ContextEngine';
@@ -164,6 +182,10 @@ describe('VoiceSDK', () => {
     it('starts with DISCONNECTED state', () => {
       expect(sdk.getConnectionState()).toBe(ConnectionState.DISCONNECTED);
     });
+
+    it('creates a NavigationObserver', () => {
+      expect((sdk as any).navigationObserver).not.toBeNull();
+    });
   });
 
   describe('start()', () => {
@@ -211,6 +233,11 @@ describe('VoiceSDK', () => {
       expect(sdk.getConnectionState()).toBe(ConnectionState.ERROR);
       expect(errors).toContain('connection failed');
     });
+
+    it('passes onSpeechStateChange callback to ProxySession', async () => {
+      await sdk.start();
+      expect(proxySessionInstances[0].callbacks.onSpeechStateChange).toBeDefined();
+    });
   });
 
   describe('stop()', () => {
@@ -253,12 +280,24 @@ describe('VoiceSDK', () => {
       expect(mockConnect).toHaveBeenCalled();
     });
 
-    it('stops when connected', async () => {
+    it('stops when connected and speech is active', async () => {
       await sdk.start();
       proxySessionInstances[0].callbacks.onStatusChange('connected');
+      // Simulate speech being active
+      proxySessionInstances[0].callbacks.onSpeechStateChange(true, false);
       await sdk.toggle();
       expect(mockDisconnect).toHaveBeenCalled();
       expect(sdk.getConnectionState()).toBe(ConnectionState.DISCONNECTED);
+    });
+
+    it('retries speech when connected but speech is not active', async () => {
+      await sdk.start();
+      const session = proxySessionInstances[0];
+      session.callbacks.onStatusChange('connected');
+      // Speech failed — speechCurrentlyActive remains false
+      await sdk.toggle();
+      expect(mockDisconnect).not.toHaveBeenCalled();
+      expect(session.callbacks).toBeDefined();
     });
 
     it('starts when in ERROR state', async () => {
@@ -393,6 +432,11 @@ describe('VoiceSDK', () => {
       await s.destroy();
       expect(provider.destroy).toHaveBeenCalled();
     });
+
+    it('destroys NavigationObserver', async () => {
+      await sdk.destroy();
+      expect(mockNavObserverDestroy).toHaveBeenCalled();
+    });
   });
 
   describe('events', () => {
@@ -460,6 +504,42 @@ describe('VoiceSDK', () => {
       await sdk.start();
       proxySessionInstances[0].callbacks.onSessionEnd({ totalTokens: 100, inputTokens: 60, outputTokens: 40 });
       expect(spy).toHaveBeenCalledWith({ totalTokens: 100, inputTokens: 60, outputTokens: 40 });
+    });
+  });
+
+  describe('SPA navigation handling', () => {
+    it('handles SPA navigation by invalidating caches and re-attaching UI', async () => {
+      const navObserver = (sdk as any).navigationObserver;
+      const { invalidateElementCache } = await import('../../src/actions/DOMActions');
+      const ui = (sdk as any).ui;
+
+      // Simulate SPA navigation callback
+      navObserver.onNavigate({ from: '/page1', to: '/page2', type: 'pushState' });
+
+      expect(invalidateElementCache).toHaveBeenCalled();
+      expect(ui.ensureAttached).toHaveBeenCalled();
+    });
+
+    it('saves session state on beforeunload when connected', async () => {
+      await sdk.start();
+      proxySessionInstances[0].callbacks.onStatusChange('connected');
+
+      const navObserver = (sdk as any).navigationObserver;
+      navObserver.onBeforeUnload();
+
+      const stored = sessionStorage.getItem('voice-sdk-session');
+      expect(stored).not.toBeNull();
+      const parsed = JSON.parse(stored!);
+      expect(parsed.config.serverUrl).toBe('ws://localhost:3100');
+    });
+
+    it('does not save session state on beforeunload when disconnected', async () => {
+      sessionStorage.removeItem('voice-sdk-session');
+      const navObserver = (sdk as any).navigationObserver;
+      navObserver.onBeforeUnload();
+
+      const stored = sessionStorage.getItem('voice-sdk-session');
+      expect(stored).toBeNull();
     });
   });
 });

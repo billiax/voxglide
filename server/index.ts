@@ -27,6 +27,8 @@ const KEEP_RECENT_TURNS = 6;
 const SESSION_CLEANUP_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_TOOL_DEPTH = 10;
 const MAX_HISTORY_ENTRIES = 200;
+const GEMINI_CACHE_MIN_TOKENS = 32_768;
+const GEMINI_CACHE_TTL = '600s'; // 10 min
 
 // ── Types ──
 
@@ -43,6 +45,9 @@ interface Session {
   lastPromptTokenCount: number;
   lastOutputTokenCount: number;
   conversationSummary: string | null;
+  cachedContentName: string | null;
+  cachedContentHash: string | null;
+  cacheEligible: boolean | null;
 }
 
 interface PendingToolTurn {
@@ -68,6 +73,8 @@ interface TrackedSession {
   turnQueue: Array<() => Promise<void>>;
   turnProcessing: boolean;
   abortController: AbortController | null;
+  lastScanData: any | null;
+  screenshots: Map<string, string>; // url -> base64 image (latest per URL)
 }
 
 // ── Session & Admin State ──
@@ -111,6 +118,8 @@ function getSessionSummary(tracked: TrackedSession) {
     connectedAt: tracked.connectedAt,
     messageCount: tracked.messageCount,
     disconnected: tracked.disconnected,
+    lastScanData: tracked.lastScanData,
+    screenshots: Object.fromEntries(tracked.screenshots),
   };
 }
 
@@ -198,14 +207,96 @@ async function maybeSummarizeHistory(session: Session, tracked: TrackedSession):
   }
 }
 
+// ── Gemini Context Caching ──
+
+function hashForCaching(systemInstruction: string, tools: Tool[]): string {
+  const payload = systemInstruction + JSON.stringify(tools);
+  return crypto.createHash('md5').update(payload).digest('hex');
+}
+
+function estimateInstructionTokens(systemInstruction: string, tools: Tool[], history: Content[]): number {
+  let chars = systemInstruction.length + JSON.stringify(tools).length;
+  for (const entry of history) {
+    for (const part of entry.parts || []) {
+      if ((part as any).text) chars += (part as any).text.length;
+      else chars += JSON.stringify(part).length;
+    }
+  }
+  return Math.ceil(chars / 4);
+}
+
+async function createOrUpdateGeminiCache(session: Session, tracked: TrackedSession): Promise<void> {
+  const hash = hashForCaching(session.systemInstruction, session.tools);
+
+  // Cache already matches — nothing to do
+  if (session.cachedContentHash === hash && session.cachedContentName) return;
+
+  const estimatedTokens = estimateInstructionTokens(
+    session.systemInstruction, session.tools, session.history,
+  );
+
+  if (estimatedTokens < GEMINI_CACHE_MIN_TOKENS) {
+    session.cacheEligible = false;
+    // Clean up stale cache if we dropped below threshold (e.g. context got smaller)
+    if (session.cachedContentName) {
+      await cleanupGeminiCache(session);
+    }
+    return;
+  }
+
+  // Clean up old cache before creating new one
+  if (session.cachedContentName) {
+    await cleanupGeminiCache(session);
+  }
+
+  try {
+    const cache = await ai.caches.create({
+      model: GEMINI_MODEL,
+      config: {
+        systemInstruction: session.systemInstruction,
+        tools: session.tools,
+        ttl: GEMINI_CACHE_TTL,
+      },
+    });
+
+    session.cachedContentName = cache.name || null;
+    session.cachedContentHash = hash;
+    session.cacheEligible = true;
+
+    logSessionEvent(tracked, 'cache.created', {
+      cacheName: session.cachedContentName,
+      estimatedTokens,
+    });
+  } catch (err: any) {
+    console.warn('[voxglide] Cache creation failed:', err.message);
+    logSessionEvent(tracked, 'cache.error', { message: err.message });
+    session.cachedContentName = null;
+    session.cachedContentHash = null;
+    session.cacheEligible = false;
+  }
+}
+
+async function cleanupGeminiCache(session: Session): Promise<void> {
+  if (!session.cachedContentName) return;
+  const name = session.cachedContentName;
+  session.cachedContentName = null;
+  session.cachedContentHash = null;
+  try {
+    await ai.caches.delete({ name });
+  } catch {
+    // Fire-and-forget: cache may already be expired
+  }
+}
+
 // ── HTTP server ──
 
 // Static file serving for SDK dist
 const distDir = path.resolve(import.meta.dirname || __dirname, '..', 'dist');
-const adminHtmlPath = path.resolve(import.meta.dirname || __dirname, 'admin.html');
+const adminDir = path.resolve(import.meta.dirname || __dirname, 'admin');
 
 const MIME_TYPES: Record<string, string> = {
   '.js': 'application/javascript',
+  '.css': 'text/css',
   '.map': 'application/json',
 };
 
@@ -224,10 +315,10 @@ const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => 
     return;
   }
 
-  // Serve admin dashboard HTML at GET /admin
+  // Serve admin dashboard at /admin and /admin/*
   if (req.url === '/admin') {
     try {
-      const html = fs.readFileSync(adminHtmlPath, 'utf-8');
+      const html = fs.readFileSync(path.join(adminDir, 'index.html'), 'utf-8');
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(html);
     } catch {
@@ -237,7 +328,30 @@ const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => 
     return;
   }
 
-  // Serve SDK files from /sdk/
+  if (req.url?.startsWith('/admin/')) {
+    const relPath = req.url.slice('/admin/'.length);
+    const filePath = path.join(adminDir, relPath);
+    const ext = path.extname(filePath);
+
+    // Prevent directory traversal and check MIME type
+    if (!filePath.startsWith(adminDir) || !MIME_TYPES[ext]) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+
+    try {
+      const content = fs.readFileSync(filePath);
+      res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] });
+      res.end(content);
+    } catch {
+      res.writeHead(404);
+      res.end();
+    }
+    return;
+  }
+
+  // Serve SDK files from /sdk/ (no-cache so dev rebuilds are always picked up)
   if (req.url?.startsWith('/sdk/')) {
     const fileName = path.basename(req.url);
     const filePath = path.join(distDir, fileName);
@@ -252,7 +366,10 @@ const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => 
 
     try {
       const content = fs.readFileSync(filePath);
-      res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] });
+      res.writeHead(200, {
+        'Content-Type': MIME_TYPES[ext],
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      });
       res.end(content);
     } catch {
       res.writeHead(404);
@@ -309,6 +426,26 @@ adminWss.on('connection', (adminWs) => {
       });
     }
   }
+
+  adminWs.on('message', async (raw) => {
+    let msg: any;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+    if (msg.type === 'screenshot.request') {
+      const sessionId = msg.sessionId;
+      if (!sessionId) {
+        sendToClient(adminWs, { type: 'screenshot.error', error: 'No sessionId provided', requestId: msg.requestId });
+        return;
+      }
+      const tracked = trackedSessions.get(sessionId);
+      if (!tracked || !tracked.clientWs || tracked.clientWs.readyState !== WebSocket.OPEN) {
+        sendToClient(adminWs, { type: 'screenshot.error', error: 'Session not connected', requestId: msg.requestId });
+        return;
+      }
+      // Forward request to SDK client
+      sendToClient(tracked.clientWs, { type: 'screenshot.request', requestId: msg.requestId });
+    }
+  });
 
   adminWs.on('close', () => {
     console.log('[voxglide] Admin client disconnected');
@@ -406,6 +543,9 @@ function handleSessionStart(clientWs: WebSocket, msg: any): void {
       lastPromptTokenCount: 0,
       lastOutputTokenCount: 0,
       conversationSummary: null,
+      cachedContentName: null,
+      cachedContentHash: null,
+      cacheEligible: null,
     },
     id: sessionId,
     pageUrl: msg.config?.pageUrl || '',
@@ -420,6 +560,8 @@ function handleSessionStart(clientWs: WebSocket, msg: any): void {
     turnQueue: [],
     turnProcessing: false,
     abortController: null,
+    lastScanData: null,
+    screenshots: new Map(),
   };
 
   trackedSessions.set(sessionId, tracked);
@@ -518,7 +660,19 @@ function handleToolProgress(tracked: TrackedSession, msg: any): void {
 }
 
 function handleScan(tracked: TrackedSession, msg: any): void {
-  logSessionEvent(tracked, 'scan', msg.data || {});
+  const scanData = msg.data || {};
+  tracked.lastScanData = scanData;
+
+  // Update pageUrl from scan data (tracks current page after SPA navigation)
+  if (scanData.url && scanData.url !== tracked.pageUrl) {
+    tracked.pageUrl = scanData.url;
+    broadcastToAdmins({
+      type: 'session.update',
+      session: getSessionSummary(tracked),
+    });
+  }
+
+  logSessionEvent(tracked, 'scan', scanData);
 }
 
 function handleContextUpdate(tracked: TrackedSession, msg: any): void {
@@ -530,6 +684,8 @@ function handleContextUpdate(tracked: TrackedSession, msg: any): void {
   const newContext = msg.context || msg.systemInstruction;
   if (newContext) {
     tracked.session.systemInstruction = newContext;
+    // Invalidate cache — will be recreated on next turn if eligible
+    tracked.session.cachedContentHash = null;
   }
   logSessionEvent(tracked, 'context.update', {
     systemInstruction: newContext || '',
@@ -539,6 +695,9 @@ function handleContextUpdate(tracked: TrackedSession, msg: any): void {
 }
 
 function handleSessionStop(tracked: TrackedSession): void {
+  if (tracked.session) {
+    cleanupGeminiCache(tracked.session);
+  }
   tracked.session = null;
   logSessionEvent(tracked, 'session.stop', {});
   sendToClient(tracked.clientWs!, { type: 'session.stopped' });
@@ -565,6 +724,9 @@ function handleWsClose(clientWs: WebSocket): void {
 
   // Clean up after 30 minutes if not reconnected
   tracked.cleanupTimer = setTimeout(() => {
+    if (tracked.session) {
+      cleanupGeminiCache(tracked.session);
+    }
     trackedSessions.delete(tracked.id);
     wsToSessionId.delete(clientWs); // safety cleanup
   }, SESSION_CLEANUP_MS);
@@ -601,6 +763,29 @@ sdkWss.on('connection', (clientWs, req) => {
       case 'scan': handleScan(tracked, msg); break;
       case 'context.update': handleContextUpdate(tracked, msg); break;
       case 'session.stop': handleSessionStop(tracked); break;
+      case 'screenshot': {
+        // Auto or on-demand screenshot from SDK client
+        const url = msg.url || tracked.lastScanData?.url || tracked.pageUrl || '';
+        if (msg.image) {
+          // Keep latest per URL, cap at 20 entries
+          tracked.screenshots.set(url, msg.image);
+          if (tracked.screenshots.size > 20) {
+            const firstKey = tracked.screenshots.keys().next().value!;
+            tracked.screenshots.delete(firstKey);
+          }
+        }
+        broadcastToAdmins({
+          type: 'session.screenshot',
+          sessionId: tracked.id,
+          url,
+          image: msg.image,
+          requestId: msg.requestId,
+        });
+        break;
+      }
+      case 'screenshot.error':
+        broadcastToAdmins({ ...msg, sessionId: tracked.id });
+        break;
       default: sendToClient(clientWs, { type: 'error', message: `Unknown message type: ${msg.type}` });
     }
   });
@@ -677,16 +862,47 @@ async function handleTurnStreaming(
   const session = tracked.session;
   if (!session) return;
 
-  const config: GenerateContentConfig = {
-    systemInstruction: session.systemInstruction,
-    tools: session.tools,
-  };
+  // Attempt Gemini context caching for large contexts
+  await createOrUpdateGeminiCache(session, tracked);
 
-  const stream = await ai.models.generateContentStream({
-    model: GEMINI_MODEL,
-    contents: session.history,
-    config,
-  });
+  let config: GenerateContentConfig;
+  if (session.cachedContentName) {
+    // Use cached content — do NOT pass systemInstruction/tools (they're in the cache)
+    config = { cachedContent: session.cachedContentName };
+  } else {
+    config = {
+      systemInstruction: session.systemInstruction,
+      tools: session.tools,
+    };
+  }
+
+  let stream;
+  try {
+    stream = await ai.models.generateContentStream({
+      model: GEMINI_MODEL,
+      contents: session.history,
+      config,
+    });
+  } catch (err: any) {
+    // If cache reference failed (expired/deleted), retry without cache
+    if (session.cachedContentName && /cache|not found|invalid/i.test(err.message)) {
+      console.warn('[voxglide] Cache reference failed, retrying without cache:', err.message);
+      session.cachedContentName = null;
+      session.cachedContentHash = null;
+      session.cacheEligible = false;
+      config = {
+        systemInstruction: session.systemInstruction,
+        tools: session.tools,
+      };
+      stream = await ai.models.generateContentStream({
+        model: GEMINI_MODEL,
+        contents: session.history,
+        config,
+      });
+    } else {
+      throw err;
+    }
+  }
 
   let accumulatedText = '';
   const functionCalls: any[] = [];

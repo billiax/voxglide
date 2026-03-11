@@ -33,6 +33,8 @@ export { InteractiveElementScanner } from './context/InteractiveElementScanner';
 export { TokenBudget } from './context/TokenBudget';
 export { ContextCache } from './context/ContextCache';
 export { ActionRouter } from './actions/ActionRouter';
+export { NavigationObserver } from './NavigationObserver';
+export type { NavigationEvent, NavigationCallback, BeforeUnloadCallback } from './NavigationObserver';
 export { EventEmitter } from './events';
 export { ConnectionState } from './constants';
 export { UIStateMachine } from './ui/UIStateMachine';

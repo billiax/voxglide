@@ -163,6 +163,7 @@ export interface StateChangeEvent {
 // ── Interactive Elements ──
 
 export interface InteractiveElement {
+  index: number;
   description: string;
   selector: string;
   tagName: string;

@@ -373,10 +373,10 @@ describe('PageContextProvider', () => {
 
       await provider.getContext();
 
-      // Trigger an attribute mutation that is NOT meaningful (not value/disabled)
+      // Trigger an attribute mutation that is NOT meaningful (e.g. data-foo)
       const observer = observerInstances[0];
       observer.callback(
-        [{ type: 'attributes', attributeName: 'class' }] as unknown as MutationRecord[],
+        [{ type: 'attributes', attributeName: 'data-foo' }] as unknown as MutationRecord[],
         observer as unknown as MutationObserver,
       );
 
@@ -426,6 +426,93 @@ describe('PageContextProvider', () => {
       const result = await provider.getContext();
       // The field is now disabled, so it should show in the output
       expect(result.content).toContain('id="field"');
+    });
+  });
+
+  describe('value-only refresh', () => {
+    it('reuses cached headings/nav for value-only change', async () => {
+      document.body.innerHTML = `
+        <h1>Static Heading</h1>
+        <nav><a href="/home">Home</a></nav>
+        <input id="field" type="text" value="old" />
+      `;
+      provider = new PageContextProvider(true);
+
+      // Initial scan — full (structural)
+      const result1 = await provider.getContext();
+      expect(result1.content).toContain('Static Heading');
+      expect(result1.content).toContain('current="old"');
+
+      // Change value and manually simulate what the debounce does:
+      // set lastChangeType to 'value-only' and mark dirty
+      (document.querySelector('#field') as HTMLInputElement).value = 'new';
+      (provider as any).lastChangeType = 'value-only';
+      provider.markDirty();
+
+      const result2 = await provider.getContext();
+      // Headings should still be present (reused from cache)
+      expect(result2.content).toContain('Static Heading');
+      // Form value should be updated
+      expect(result2.content).toContain('current="new"');
+    });
+
+    it('structural change always does full rescan', async () => {
+      document.body.innerHTML = `
+        <h1>Old Heading</h1>
+        <input id="field" type="text" value="val" />
+      `;
+      provider = new PageContextProvider(true);
+
+      await provider.getContext();
+
+      // Add new heading and simulate structural change
+      document.body.innerHTML = `
+        <h1>New Heading</h1>
+        <h2>Sub Heading</h2>
+        <input id="field" type="text" value="val" />
+      `;
+      (provider as any).lastChangeType = 'structural';
+      provider.markDirty();
+
+      const result = await provider.getContext();
+      expect(result.content).toContain('New Heading');
+      expect(result.content).toContain('Sub Heading');
+    });
+
+    it('first scan is always structural (no cache to reuse)', async () => {
+      document.body.innerHTML = '<h1>Title</h1>';
+      provider = new PageContextProvider(true);
+
+      expect(provider.getLastChangeType()).toBe('structural');
+    });
+  });
+
+  describe('getLastChangeType()', () => {
+    it('returns structural initially', () => {
+      provider = new PageContextProvider(true);
+      expect(provider.getLastChangeType()).toBe('structural');
+    });
+  });
+
+  describe('getSectionFingerprints()', () => {
+    it('returns section fingerprints after getContext()', async () => {
+      document.body.innerHTML = `
+        <h1>Title</h1>
+        <input id="field" type="text" />
+      `;
+      provider = new PageContextProvider(true);
+
+      await provider.getContext();
+
+      const fingerprints = provider.getSectionFingerprints();
+      expect(fingerprints).toBeDefined();
+      expect(typeof fingerprints.header).toBe('string');
+    });
+
+    it('returns empty object before first getContext()', () => {
+      provider = new PageContextProvider(true);
+      const fingerprints = provider.getSectionFingerprints();
+      expect(Object.keys(fingerprints)).toHaveLength(0);
     });
   });
 
@@ -525,6 +612,85 @@ describe('PageContextProvider', () => {
 
       expect(result.content).toContain('id="included"');
       expect(result.content).not.toContain('id="excluded"');
+    });
+  });
+
+  describe('expanded attribute filter', () => {
+    it('re-scans when aria-expanded attribute changes', async () => {
+      document.body.innerHTML = '<button aria-expanded="false">Menu</button>';
+      provider = new PageContextProvider(true);
+      await provider.getContext();
+
+      const observer = observerInstances[0];
+      document.body.innerHTML = '<button aria-expanded="true">Menu</button>';
+
+      observer.callback(
+        [{ type: 'attributes', attributeName: 'aria-expanded' }] as unknown as MutationRecord[],
+        observer as unknown as MutationObserver,
+      );
+
+      const result = await provider.getContext();
+      // Should have re-scanned (dirty flag was set)
+      expect(result.content).toContain('Menu');
+    });
+
+    it('re-scans when class attribute changes', async () => {
+      document.body.innerHTML = '<button class="inactive">Toggle</button>';
+      provider = new PageContextProvider(true);
+      await provider.getContext();
+
+      const observer = observerInstances[0];
+      document.body.innerHTML = '<button class="active">Toggle</button>';
+
+      observer.callback(
+        [{ type: 'attributes', attributeName: 'class' }] as unknown as MutationRecord[],
+        observer as unknown as MutationObserver,
+      );
+
+      const result = await provider.getContext();
+      expect(result.content).toContain('Toggle');
+    });
+
+    it('re-scans when open attribute changes', async () => {
+      document.body.innerHTML = '<details><summary>More info</summary></details>';
+      provider = new PageContextProvider(true);
+      await provider.getContext();
+
+      const observer = observerInstances[0];
+      observer.callback(
+        [{ type: 'attributes', attributeName: 'open' }] as unknown as MutationRecord[],
+        observer as unknown as MutationObserver,
+      );
+
+      // Dirty flag should be set
+      document.body.innerHTML = '<details open><summary>More info</summary><p>Details</p></details>';
+      const result = await provider.getContext();
+      expect(result.content).toContain('More info');
+    });
+  });
+
+  describe('element index in context format', () => {
+    it('includes element index in formatted output', async () => {
+      document.body.innerHTML = '<button>Submit Form</button>';
+      // Make the button "visible" in jsdom
+      const btn = document.querySelector('button')!;
+      Object.defineProperty(btn, 'offsetParent', { value: document.body, configurable: true });
+
+      provider = new PageContextProvider(true);
+
+      const result = await provider.getContext();
+      // Should contain index like [1] [button]
+      expect(result.content).toMatch(/\[1\] \[button\]/);
+    });
+  });
+
+  describe('getScanner()', () => {
+    it('returns the underlying InteractiveElementScanner', () => {
+      provider = new PageContextProvider(true);
+      const scanner = provider.getScanner();
+      expect(scanner).toBeDefined();
+      expect(typeof scanner.scan).toBe('function');
+      expect(typeof scanner.getElementByIndex).toBe('function');
     });
   });
 

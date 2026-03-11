@@ -85,6 +85,15 @@ export const SDK_STYLES = `
     background: var(--vsdk-danger-hover);
   }
 
+  .vsdk-btn.paused {
+    background: #d97706;
+    animation: vsdk-pulse-amber 2s ease-in-out infinite;
+  }
+
+  .vsdk-btn.paused:hover {
+    background: #b45309;
+  }
+
   .vsdk-btn.connecting {
     background: var(--vsdk-primary);
     opacity: 0.8;
@@ -103,6 +112,11 @@ export const SDK_STYLES = `
   @keyframes vsdk-pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4); }
     50% { box-shadow: 0 0 0 12px rgba(220, 38, 38, 0); }
+  }
+
+  @keyframes vsdk-pulse-amber {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.4); }
+    50% { box-shadow: 0 0 0 10px rgba(217, 119, 6, 0); }
   }
 
   @keyframes vsdk-spin {

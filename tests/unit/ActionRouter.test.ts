@@ -41,10 +41,10 @@ describe('ActionRouter', () => {
       expect(parsed.content).toBe('Hello');
     });
 
-    it('registers built-in handler: navigateTo', async () => {
+    it('navigateTo is no longer a built-in handler', async () => {
       const result = await router.route({ id: '4', name: 'navigateTo', args: { url: '/page' } });
       const parsed = JSON.parse(result.result);
-      expect(parsed.success).toBe(true);
+      expect(parsed.error).toContain('Unknown action');
     });
   });
 

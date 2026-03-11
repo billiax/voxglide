@@ -1,4 +1,4 @@
-import { micIcon, micOffIcon, loaderIcon, chatIcon, closeIcon } from './icons';
+import { micIcon, micOffIcon, micPausedIcon, loaderIcon, chatIcon, closeIcon } from './icons';
 import { ConnectionState } from '../constants';
 import type { UIState } from './UIStateMachine';
 
@@ -22,7 +22,7 @@ export class FloatingButton {
 
   render(state: Readonly<UIState>): void {
     // Remove all state classes
-    this.button.classList.remove('listening', 'connecting');
+    this.button.classList.remove('listening', 'connecting', 'paused');
 
     if (state.inputMode === 'text') {
       // Text mode
@@ -49,12 +49,26 @@ export class FloatingButton {
           break;
       }
     } else {
-      // Voice mode: mic icons
+      // Voice mode: mic icons reflecting actual speech state
       switch (state.connection) {
         case ConnectionState.CONNECTED:
-          this.button.classList.add('listening');
-          this.button.innerHTML = micOffIcon;
-          this.button.setAttribute('aria-label', 'Stop voice assistant');
+          if (state.speechPaused) {
+            // Speech paused (TTS playing or text input active)
+            this.button.classList.add('paused');
+            this.button.innerHTML = micPausedIcon;
+            this.button.setAttribute('aria-label', 'Microphone paused');
+          } else if (state.speechActive) {
+            // Actively recording
+            this.button.classList.add('listening');
+            this.button.innerHTML = micOffIcon;
+            this.button.setAttribute('aria-label', 'Stop voice assistant');
+          } else {
+            // Connected but speech not active (failed or unavailable).
+            // Show paused mic so user knows mic isn't capturing.
+            this.button.classList.add('paused');
+            this.button.innerHTML = micPausedIcon;
+            this.button.setAttribute('aria-label', 'Microphone unavailable — use text input');
+          }
           break;
         case ConnectionState.CONNECTING:
           this.button.classList.add('connecting');

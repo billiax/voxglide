@@ -7,7 +7,7 @@ type ActionHandler = (args: Record<string, unknown>) => Promise<{ result: string
 
 /**
  * Routes AI tool calls to appropriate handlers.
- * Built-in handlers: fillField, clickElement, readContent, navigateTo.
+ * Built-in handlers: fillField, clickElement, readContent.
  * Custom handlers can be registered via registerHandler().
  */
 export class ActionRouter {
@@ -21,7 +21,6 @@ export class ActionRouter {
     this.handlers.set('fillField', fillField);
     this.handlers.set('clickElement', clickElement);
     this.handlers.set('readContent', readContent);
-    this.handlers.set('navigateTo', (args) => this.navigationHandler.navigateTo(args));
   }
 
   /**

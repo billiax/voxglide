@@ -4,6 +4,7 @@
 
 import { waitForElement } from './ElementWaiter';
 import { INTERACTIVE_SELECTOR } from '../constants';
+import { scoreText, getNearbyLabelText, dispatchClickSequence } from './dom-utils';
 
 type FieldElement = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 type EditableElement = FieldElement | HTMLElement;
@@ -30,6 +31,26 @@ function getCachedClick(key: string): HTMLElement | null {
 export function invalidateElementCache(): void {
   fieldCache.clear();
   clickCache.clear();
+}
+
+// ── Module-level resolver/callback setters ──
+
+let indexResolver: ((index: number) => HTMLElement | null) | null = null;
+
+export function setIndexResolver(resolver: ((index: number) => HTMLElement | null) | null): void {
+  indexResolver = resolver;
+}
+
+let rescanCallback: (() => Promise<void>) | null = null;
+
+export function setRescanCallback(callback: (() => Promise<void>) | null): void {
+  rescanCallback = callback;
+}
+
+let postClickCallback: (() => void) | null = null;
+
+export function setPostClickCallback(callback: (() => void) | null): void {
+  postClickCallback = callback;
 }
 
 /**
@@ -106,8 +127,6 @@ function cacheField(fieldId: string, el: EditableElement): EditableElement {
  * On tie, prefer visible/enabled elements.
  */
 function scoredFuzzyResolve(fieldId: string): EditableElement | null {
-  const lower = fieldId.toLowerCase();
-
   interface ScoredCandidate {
     el: EditableElement;
     score: number;
@@ -115,25 +134,12 @@ function scoredFuzzyResolve(fieldId: string): EditableElement | null {
     enabled: boolean;
   }
 
-  function scoreText(text: string | null | undefined): number {
-    if (!text) return 0;
-    const t = text.trim().toLowerCase();
-    if (!t) return 0;
-    if (t === lower) return 100;
-    if (t.startsWith(lower)) return 80;
-    // Word boundary: check if fieldId appears after a word boundary
-    const wordBoundaryPattern = new RegExp(`\\b${lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
-    if (wordBoundaryPattern.test(t)) return 60;
-    if (t.includes(lower)) return 40;
-    return 0;
-  }
-
   const candidates: ScoredCandidate[] = [];
 
   // Score label-associated fields
   const labels = document.querySelectorAll('label');
   for (const label of labels) {
-    const labelScore = scoreText(label.textContent);
+    const labelScore = scoreText(label.textContent, fieldId);
     if (labelScore === 0) continue;
 
     const forAttr = label.getAttribute('for');
@@ -166,9 +172,9 @@ function scoredFuzzyResolve(fieldId: string): EditableElement | null {
   for (const el of allFields) {
     if (!isEditableElement(el)) continue;
 
-    const placeholderScore = scoreText((el as HTMLInputElement).placeholder);
-    const ariaScore = scoreText(el.getAttribute('aria-label'));
-    const nameScore = scoreText(el.getAttribute('name'));
+    const placeholderScore = scoreText((el as HTMLInputElement).placeholder, fieldId);
+    const ariaScore = scoreText(el.getAttribute('aria-label'), fieldId);
+    const nameScore = scoreText(el.getAttribute('name'), fieldId);
     const bestScore = Math.max(placeholderScore, ariaScore, nameScore);
 
     if (bestScore > 0) {
@@ -210,6 +216,7 @@ function isContentEditable(el: Element): boolean {
 
 /**
  * Set a field value and dispatch change events so frameworks detect the update.
+ * Note: focus should already have been called by the caller.
  */
 function setFieldValue(el: EditableElement, value: string): void {
   // Handle contenteditable elements
@@ -245,8 +252,7 @@ function setFieldValue(el: EditableElement, value: string): void {
     }
   }
 
-  // Dispatch events to notify frameworks
-  el.dispatchEvent(new Event('focus', { bubbles: true }));
+  // Dispatch events to notify frameworks (focus already called by caller)
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
   el.dispatchEvent(new Event('blur', { bubbles: true }));
@@ -281,7 +287,8 @@ async function fillCombobox(el: HTMLElement, value: string): Promise<boolean> {
 }
 
 /**
- * Resolve a clickable element by text content → aria-label → title → nearby label → CSS selector
+ * Resolve a clickable element using scored matching across text, aria-label, title, and nearby labels.
+ * Returns the best match (highest score), preferring visible elements on tie.
  */
 function resolveClickTarget(description: string, selector?: string): HTMLElement | null {
   // Check cache
@@ -295,89 +302,59 @@ function resolveClickTarget(description: string, selector?: string): HTMLElement
     if (el) return cacheClick(cacheKey, el);
   }
 
-  const lower = description.toLowerCase();
+  if (!description) return null;
 
-  // 2. By text content (using full interactive selector)
+  // 2. Scored matching across all clickable elements
   const clickables = document.querySelectorAll(INTERACTIVE_SELECTOR);
-  for (const el of clickables) {
-    const text = el.textContent?.trim().toLowerCase();
-    if (text === lower) return cacheClick(cacheKey, el as HTMLElement);
+
+  interface ScoredClickCandidate {
+    el: HTMLElement;
+    score: number;
+    visible: boolean;
   }
 
-  // 3. Partial text match
-  for (const el of clickables) {
-    const text = el.textContent?.trim().toLowerCase();
-    if (text && text.includes(lower)) return cacheClick(cacheKey, el as HTMLElement);
-  }
+  const candidates: ScoredClickCandidate[] = [];
 
-  // 4. By aria-label
   for (const el of clickables) {
-    const ariaLabel = el.getAttribute('aria-label')?.toLowerCase();
-    if (ariaLabel && (ariaLabel === lower || ariaLabel.includes(lower))) return cacheClick(cacheKey, el as HTMLElement);
-  }
+    const htmlEl = el as HTMLElement;
 
-  // 5. By title
-  for (const el of clickables) {
-    const title = (el as HTMLElement).title?.toLowerCase();
-    if (title && (title === lower || title.includes(lower))) return cacheClick(cacheKey, el as HTMLElement);
-  }
+    // Score across multiple text sources, take best
+    const textScore = scoreText(el.textContent?.trim(), description);
+    const ariaScore = scoreText(el.getAttribute('aria-label'), description);
+    const titleScore = scoreText(htmlEl.title, description);
 
-  // 6. By nearby label text — for label-less controls (switches, toggles, checkboxes)
-  //    Search sibling/parent text that matches the description
-  for (const el of clickables) {
+    // Check nearby label for label-less controls
+    let nearbyScore = 0;
     const role = el.getAttribute('role');
     const tag = el.tagName.toLowerCase();
     const isLabellessControl = role === 'switch' || role === 'checkbox' || role === 'slider'
       || (tag === 'input' && ((el as HTMLInputElement).type === 'checkbox' || (el as HTMLInputElement).type === 'radio'));
-    if (!isLabellessControl) continue;
+    if (isLabellessControl) {
+      const nearbyText = getNearbyLabelText(htmlEl);
+      nearbyScore = scoreText(nearbyText, description);
+    }
 
-    const nearbyText = getNearbyLabelText(el as HTMLElement);
-    if (nearbyText && nearbyText.includes(lower)) {
-      return cacheClick(cacheKey, el as HTMLElement);
+    const bestScore = Math.max(textScore, ariaScore, titleScore, nearbyScore);
+    if (bestScore > 0) {
+      candidates.push({
+        el: htmlEl,
+        score: bestScore,
+        visible: htmlEl.offsetParent !== null,
+      });
     }
   }
 
-  return null;
-}
+  if (candidates.length === 0) return null;
 
-/**
- * Find label text from sibling/parent elements for controls without their own text.
- * Searches both preceding and following siblings.
- */
-function getNearbyLabelText(el: HTMLElement): string {
-  // Check preceding siblings
-  let sibling: Element | null = el.previousElementSibling;
-  while (sibling) {
-    const text = sibling.textContent?.trim().toLowerCase();
-    if (text && text.length < 100) return text;
-    sibling = sibling.previousElementSibling;
-  }
+  // Sort by score descending, prefer visible on tie
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.visible && !b.visible) return -1;
+    if (!a.visible && b.visible) return 1;
+    return 0;
+  });
 
-  // Check following siblings
-  sibling = el.nextElementSibling;
-  while (sibling) {
-    const text = sibling.textContent?.trim().toLowerCase();
-    if (text && text.length < 100) return text;
-    sibling = sibling.nextElementSibling;
-  }
-
-  // Walk up to parent containers and check their text/siblings
-  let parent = el.parentElement;
-  for (let depth = 0; parent && depth < 3; depth++) {
-    const prevSibling = parent.previousElementSibling;
-    if (prevSibling) {
-      const text = prevSibling.textContent?.trim().toLowerCase();
-      if (text && text.length < 100) return text;
-    }
-    const nextSibling = parent.nextElementSibling;
-    if (nextSibling) {
-      const text = nextSibling.textContent?.trim().toLowerCase();
-      if (text && text.length < 100) return text;
-    }
-    parent = parent.parentElement;
-  }
-
-  return '';
+  return cacheClick(cacheKey, candidates[0].el);
 }
 
 function cacheClick(key: string, el: HTMLElement): HTMLElement {
@@ -390,22 +367,42 @@ function cacheClick(key: string, el: HTMLElement): HTMLElement {
 export async function fillField(args: Record<string, unknown>): Promise<{ result: string }> {
   const fieldId = String(args.fieldId || '');
   const value = String(args.value || '');
+  const index = typeof args.index === 'number' ? args.index : undefined;
 
-  if (!fieldId) return { result: JSON.stringify({ error: 'No fieldId provided' }) };
+  if (!fieldId && index === undefined) return { result: JSON.stringify({ error: 'No fieldId or index provided' }) };
 
-  // Try immediate resolve, then wait for element
-  let el = resolveField(fieldId);
-  if (!el) {
-    el = await waitForElement(() => resolveField(fieldId));
+  // Try index-based resolution first
+  let el: EditableElement | null = null;
+  if (index !== undefined && indexResolver) {
+    const resolved = indexResolver(index);
+    if (resolved && isEditableElement(resolved)) {
+      el = resolved;
+    }
   }
-  if (!el) return { result: JSON.stringify({ error: `Could not find field "${fieldId}"` }) };
+
+  // Fall through to fieldId-based resolution
+  if (!el && fieldId) {
+    el = resolveField(fieldId);
+    if (!el) {
+      el = await waitForElement(() => resolveField(fieldId));
+    }
+
+    // Self-healing retry: re-scan and try again
+    if (!el && rescanCallback) {
+      invalidateElementCache();
+      await rescanCallback();
+      el = resolveField(fieldId);
+    }
+  }
+
+  if (!el) return { result: JSON.stringify({ error: `Could not find field "${fieldId || `index:${index}`}"` }) };
 
   if ((el as HTMLInputElement).type === 'password') {
     return { result: JSON.stringify({ error: 'Cannot fill password fields' }) };
   }
 
   if ((el as HTMLInputElement).disabled) {
-    return { result: JSON.stringify({ error: `Field "${fieldId}" is disabled` }) };
+    return { result: JSON.stringify({ error: `Field "${fieldId || `index:${index}`}" is disabled` }) };
   }
 
   // Check if this is a combobox
@@ -414,35 +411,82 @@ export async function fillField(args: Record<string, unknown>): Promise<{ result
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     const filled = await fillCombobox(comboEl as HTMLElement, value);
     if (filled) {
-      return { result: JSON.stringify({ success: true, field: fieldId, value }) };
+      return { result: JSON.stringify({ success: true, field: fieldId || `index:${index}`, value }) };
     }
-    return { result: JSON.stringify({ error: `Could not select "${value}" from combobox "${fieldId}".` }) };
+    return { result: JSON.stringify({ error: `Could not select "${value}" from combobox "${fieldId || `index:${index}`}".` }) };
   }
 
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   el.focus();
   setFieldValue(el, value);
 
-  return { result: JSON.stringify({ success: true, field: fieldId, value }) };
+  return { result: JSON.stringify({ success: true, field: fieldId || `index:${index}`, value }) };
 }
 
 export async function clickElement(args: Record<string, unknown>): Promise<{ result: string }> {
   const description = String(args.description || '');
   const selector = args.selector ? String(args.selector) : undefined;
+  const index = typeof args.index === 'number' ? args.index : undefined;
 
-  if (!description && !selector) return { result: JSON.stringify({ error: 'No description or selector provided' }) };
+  if (!description && !selector && index === undefined) {
+    return { result: JSON.stringify({ error: 'No description, selector, or index provided' }) };
+  }
 
-  // Try immediate resolve, then wait for element
+  const urlBefore = window.location.href;
+
+  // Try index-based resolution first
+  if (index !== undefined && indexResolver) {
+    const el = indexResolver(index);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      dispatchClickSequence(el);
+      notifyIfUrlChanged(urlBefore);
+      // Include element text so the AI (and admin) can verify what was clicked
+      const elText = el.getAttribute('aria-label') || el.textContent?.trim().slice(0, 80) || '';
+      const clickedLabel = description || elText || `index:${index}`;
+      return { result: JSON.stringify({ success: true, clicked: clickedLabel, index }) };
+    }
+  }
+
+  // Fall through to description/selector resolution
   let el = resolveClickTarget(description, selector);
   if (!el) {
     el = await waitForElement(() => resolveClickTarget(description, selector));
   }
+
+  // Self-healing retry: re-scan and try again
+  if (!el && rescanCallback) {
+    invalidateElementCache();
+    await rescanCallback();
+    el = resolveClickTarget(description, selector);
+  }
+
   if (!el) return { result: JSON.stringify({ error: `Could not find element "${description}"` }) };
 
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  el.click();
+  dispatchClickSequence(el);
+  notifyIfUrlChanged(urlBefore);
 
-  return { result: JSON.stringify({ success: true, clicked: description }) };
+  return { result: JSON.stringify({ success: true, clicked: description || selector }) };
+}
+
+/**
+ * Check if URL changed after a click (SPA navigation) and notify the SDK.
+ * Uses a microtask delay to let pushState/replaceState fire first.
+ */
+function notifyIfUrlChanged(urlBefore: string): void {
+  if (!postClickCallback) return;
+  // Check immediately (synchronous pushState)
+  if (window.location.href !== urlBefore) {
+    postClickCallback();
+    return;
+  }
+  // Check after microtask (async navigation)
+  Promise.resolve().then(() => {
+    if (window.location.href !== urlBefore) {
+      postClickCallback?.();
+    }
+  });
 }
 
 export async function readContent(args: Record<string, unknown>): Promise<{ result: string }> {

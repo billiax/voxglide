@@ -1,5 +1,6 @@
 import type { InteractiveElement, ElementCapability } from '../types';
 import { INTERACTIVE_SELECTOR } from '../constants';
+import { getNearbyLabelText } from '../actions/dom-utils';
 
 /**
  * Deeply scans the DOM for all interactive elements and categorizes
@@ -11,6 +12,8 @@ export class InteractiveElementScanner {
   private wasTruncated = false;
   private totalFound = 0;
   private includedCount = 0;
+  private indexMap = new Map<number, HTMLElement>();
+  private nextIndex = 1;
 
   constructor(maxElements = 100) {
     this.maxElements = maxElements;
@@ -23,6 +26,10 @@ export class InteractiveElementScanner {
     const rawElements = document.querySelectorAll(INTERACTIVE_SELECTOR);
     const results: InteractiveElement[] = [];
     let visibleCount = 0;
+
+    // Clear index map and reset counter for each scan
+    this.indexMap.clear();
+    this.nextIndex = 1;
 
     for (const el of rawElements) {
       const htmlEl = el as HTMLElement;
@@ -47,12 +54,17 @@ export class InteractiveElementScanner {
 
       if (results.length >= this.maxElements) continue;
 
+      // Assign index before viewport sort so indices are stable per scan
+      const index = this.nextIndex++;
+      this.indexMap.set(index, htmlEl);
+
       const selector = this.generateSelector(htmlEl);
       const role = htmlEl.getAttribute('role') || undefined;
       const state = this.captureState(htmlEl);
       const inViewport = this.isInViewport(htmlEl);
 
       results.push({
+        index,
         description,
         selector,
         tagName: htmlEl.tagName.toLowerCase(),
@@ -62,6 +74,13 @@ export class InteractiveElementScanner {
         inViewport,
       });
     }
+
+    // Secondary pass: detect cursor:pointer elements missed by selector scan.
+    // Common in React/Vue/Angular apps where divs have framework event handlers
+    // but no semantic HTML attributes (no role, no tabindex, no onclick attr).
+    const selectorMatched = new Set<Element>(rawElements);
+    const cursorPointerCount = this.scanCursorPointerElements(selectorMatched, results);
+    visibleCount += cursorPointerCount;
 
     // Track truncation info
     this.totalFound = visibleCount;
@@ -76,6 +95,24 @@ export class InteractiveElementScanner {
     });
 
     return results;
+  }
+
+  /**
+   * Resolve an element by its scan index. Returns null if the element
+   * is no longer connected to the DOM.
+   */
+  getElementByIndex(index: number): HTMLElement | null {
+    const el = this.indexMap.get(index);
+    if (el?.isConnected) return el;
+    this.indexMap.delete(index);
+    return null;
+  }
+
+  /**
+   * Returns the full index map for bulk access.
+   */
+  getIndexMap(): Map<number, HTMLElement> {
+    return this.indexMap;
   }
 
   /**
@@ -107,6 +144,108 @@ export class InteractiveElementScanner {
 
     const contentLen = (document.querySelector('main') || document.body)?.textContent?.length || 0;
     return `${interactiveCount}:${formCount}:${bodyChildCount}:${valueHash}:${contentLen}`;
+  }
+
+  /**
+   * Fingerprint based only on structural DOM signals (element counts).
+   * Does not change when input values change.
+   */
+  computeStructuralFingerprint(): string {
+    const interactiveCount = document.querySelectorAll(INTERACTIVE_SELECTOR).length;
+    const formCount = document.querySelectorAll('form').length;
+    const bodyChildCount = document.body ? document.body.children.length : 0;
+    return `s:${interactiveCount}:${formCount}:${bodyChildCount}`;
+  }
+
+  /**
+   * Fingerprint based only on value/content signals.
+   * Changes when input values or main content length change, but not when elements are added/removed.
+   */
+  computeValueFingerprint(): string {
+    let valueHash = 0;
+    document.querySelectorAll('input, select, textarea').forEach((el) => {
+      const val = (el as HTMLInputElement).value;
+      if (val) valueHash = (valueHash * 31 + simpleHash(val)) | 0;
+    });
+
+    const contentLen = (document.querySelector('main') || document.body)?.textContent?.length || 0;
+    return `v:${valueHash}:${contentLen}`;
+  }
+
+  /**
+   * Secondary scan: find elements with cursor:pointer that weren't caught
+   * by the selector-based scan. Detects clickable divs/spans/li/etc common
+   * in React/Vue/Angular apps with framework-managed event handlers.
+   *
+   * Only picks the outermost cursor:pointer ancestor to avoid duplicates
+   * from nested children that inherit the style.
+   */
+  private scanCursorPointerElements(
+    selectorMatched: Set<Element>,
+    results: InteractiveElement[],
+  ): number {
+    const SKIP_TAGS = new Set([
+      'svg', 'path', 'rect', 'circle', 'ellipse', 'line', 'g',
+      'polygon', 'polyline', 'use', 'defs', 'clippath',
+      'script', 'style', 'noscript', 'link', 'meta', 'img', 'br', 'hr',
+    ]);
+    const MAX_STYLE_CHECKS = 500;
+    const MIN_SIZE = 16;
+
+    let checks = 0;
+    let addedCount = 0;
+    const foundRoots: HTMLElement[] = [];
+
+    const allElements = document.body.querySelectorAll('*');
+    for (const node of allElements) {
+      if (checks >= MAX_STYLE_CHECKS) break;
+      if (results.length >= this.maxElements) break;
+
+      const el = node as HTMLElement;
+      const tag = el.tagName.toLowerCase();
+      if (SKIP_TAGS.has(tag)) continue;
+
+      // Skip SDK elements
+      if (el.closest('[data-voice-sdk]')) continue;
+
+      // Skip if already matched by selector (is or is inside one)
+      if (selectorMatched.has(el)) continue;
+      if (el.closest(INTERACTIVE_SELECTOR)) continue;
+
+      // Skip if inside an already-found cursor:pointer root
+      if (foundRoots.some(root => root.contains(el))) continue;
+
+      checks++;
+      const style = window.getComputedStyle(el);
+      if (style.cursor !== 'pointer') continue;
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+
+      // Minimum size filter — avoids tiny decorative elements
+      const rect = el.getBoundingClientRect();
+      if (rect.width < MIN_SIZE || rect.height < MIN_SIZE) continue;
+
+      // Must have visible text
+      const description = this.generateDescription(el);
+      if (!description) continue;
+
+      foundRoots.push(el);
+
+      const index = this.nextIndex++;
+      this.indexMap.set(index, el);
+
+      results.push({
+        index,
+        description,
+        selector: this.generateSelector(el),
+        tagName: tag,
+        role: el.getAttribute('role') || undefined,
+        capabilities: ['clickable'],
+        inViewport: this.isInViewport(el),
+      });
+      addedCount++;
+    }
+
+    return addedCount;
   }
 
   private isInViewport(el: HTMLElement): boolean {
@@ -194,6 +333,8 @@ export class InteractiveElementScanner {
   private generateDescription(el: HTMLElement): string {
     const tag = el.tagName.toLowerCase();
     const role = el.getAttribute('role');
+    const isEditable = tag === 'input' || tag === 'textarea' || tag === 'select'
+      || (el.hasAttribute('contenteditable') && el.getAttribute('contenteditable') !== 'false');
 
     // Try various sources for a descriptive label
     const ariaLabel = el.getAttribute('aria-label');
@@ -215,12 +356,20 @@ export class InteractiveElementScanner {
     const placeholder = (el as HTMLInputElement).placeholder;
     if (placeholder) return this.truncate(placeholder, 60);
 
-    // For inputs, use label or name
+    // For form elements, use associated label or name attribute
     if (tag === 'input' || tag === 'textarea' || tag === 'select') {
       const label = this.findLabelText(el);
       if (label) return this.truncate(label, 60);
       const name = el.getAttribute('name');
       if (name) return name;
+    }
+
+    // For contenteditable elements, try associated label and nearby text
+    if (el.hasAttribute('contenteditable') && el.getAttribute('contenteditable') !== 'false') {
+      const label = this.findLabelText(el);
+      if (label) return this.truncate(label, 60);
+      const nearby = getNearbyLabelText(el);
+      if (nearby) return this.truncate(nearby, 60);
     }
 
     // Text content (trimmed, truncated)
@@ -229,49 +378,22 @@ export class InteractiveElementScanner {
 
     // For label-less controls (switches, checkboxes), look at nearby sibling/parent text
     if (role === 'switch' || role === 'checkbox' || role === 'radio' || role === 'slider') {
-      const nearby = this.findNearbyLabelText(el);
+      const nearby = getNearbyLabelText(el);
       if (nearby) return this.truncate(nearby, 60);
     }
 
-    return '';
-  }
-
-  /**
-   * For controls without their own text (role=switch, checkbox, etc.),
-   * look at sibling elements (preceding and following) and parent containers for label text.
-   */
-  private findNearbyLabelText(el: HTMLElement): string {
-    // Check preceding siblings for text
-    let sibling: Element | null = el.previousElementSibling;
-    while (sibling) {
-      const text = sibling.textContent?.trim();
-      if (text && text.length < 80) return text;
-      sibling = sibling.previousElementSibling;
-    }
-
-    // Check following siblings for text
-    sibling = el.nextElementSibling;
-    while (sibling) {
-      const text = sibling.textContent?.trim();
-      if (text && text.length < 80) return text;
-      sibling = sibling.nextElementSibling;
-    }
-
-    // Walk up to find a container with text that isn't just the element itself
-    let parent = el.parentElement;
-    for (let depth = 0; parent && depth < 3; depth++) {
-      // Look at siblings of the parent (both directions)
-      const prevSibling = parent.previousElementSibling;
-      if (prevSibling) {
-        const text = prevSibling.textContent?.trim();
-        if (text && text.length < 80) return text;
+    // Fallback for editable elements: never drop them from scan results even when empty.
+    // Use role, type, or tag to generate a minimal description so the AI can still target them.
+    if (isEditable) {
+      if (role) return role;
+      if (tag === 'input') {
+        const type = (el as HTMLInputElement).type || 'text';
+        return `${type} input`;
       }
-      const nextSibling = parent.nextElementSibling;
-      if (nextSibling) {
-        const text = nextSibling.textContent?.trim();
-        if (text && text.length < 80) return text;
-      }
-      parent = parent.parentElement;
+      if (tag === 'textarea') return 'textarea';
+      if (tag === 'select') return 'select';
+      // contenteditable
+      return 'editable area';
     }
 
     return '';
