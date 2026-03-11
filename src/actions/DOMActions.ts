@@ -47,6 +47,12 @@ export function setRescanCallback(callback: (() => Promise<void>) | null): void 
   rescanCallback = callback;
 }
 
+let postClickCallback: (() => void) | null = null;
+
+export function setPostClickCallback(callback: (() => void) | null): void {
+  postClickCallback = callback;
+}
+
 /**
  * Resolve a form field by cascading through: id → name → label text → placeholder → aria-label → combobox → scored fuzzy
  */
@@ -426,13 +432,19 @@ export async function clickElement(args: Record<string, unknown>): Promise<{ res
     return { result: JSON.stringify({ error: 'No description, selector, or index provided' }) };
   }
 
+  const urlBefore = window.location.href;
+
   // Try index-based resolution first
   if (index !== undefined && indexResolver) {
     const el = indexResolver(index);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       dispatchClickSequence(el);
-      return { result: JSON.stringify({ success: true, clicked: description || `index:${index}` }) };
+      notifyIfUrlChanged(urlBefore);
+      // Include element text so the AI (and admin) can verify what was clicked
+      const elText = el.getAttribute('aria-label') || el.textContent?.trim().slice(0, 80) || '';
+      const clickedLabel = description || elText || `index:${index}`;
+      return { result: JSON.stringify({ success: true, clicked: clickedLabel, index }) };
     }
   }
 
@@ -453,8 +465,28 @@ export async function clickElement(args: Record<string, unknown>): Promise<{ res
 
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   dispatchClickSequence(el);
+  notifyIfUrlChanged(urlBefore);
 
   return { result: JSON.stringify({ success: true, clicked: description || selector }) };
+}
+
+/**
+ * Check if URL changed after a click (SPA navigation) and notify the SDK.
+ * Uses a microtask delay to let pushState/replaceState fire first.
+ */
+function notifyIfUrlChanged(urlBefore: string): void {
+  if (!postClickCallback) return;
+  // Check immediately (synchronous pushState)
+  if (window.location.href !== urlBefore) {
+    postClickCallback();
+    return;
+  }
+  // Check after microtask (async navigation)
+  Promise.resolve().then(() => {
+    if (window.location.href !== urlBefore) {
+      postClickCallback?.();
+    }
+  });
 }
 
 export async function readContent(args: Record<string, unknown>): Promise<{ result: string }> {

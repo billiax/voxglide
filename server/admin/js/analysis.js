@@ -443,7 +443,6 @@ export function renderAnalysis() {
 
   // ── 1. Session Summary Card ──
   const pages = groupScansByPage(scanEvents);
-  const distinctUrls = new Set(scanEvents.map(se => se.data.url || '')).size;
   const interactive = Array.isArray(scan.interactiveElements) ? scan.interactiveElements : [];
   const forms = Array.isArray(scan.forms) ? scan.forms : [];
   const textEvents = allEvents.filter(e => e.type === 'text').length;
@@ -457,7 +456,7 @@ export function renderAnalysis() {
   }
 
   const stats = [];
-  if (distinctUrls > 0) stats.push({ value: distinctUrls, label: 'Pages', accent: 'accent-blue' });
+  if (pages.length > 0) stats.push({ value: pages.length, label: 'Pages', accent: 'accent-blue' });
   if (interactive.length > 0) stats.push({ value: interactive.length, label: 'Interactive', accent: 'accent-purple' });
   if (forms.length > 0) stats.push({ value: forms.length, label: 'Form Fields', accent: 'accent-green' });
   if (textEvents > 0) stats.push({ value: textEvents, label: 'Messages', accent: 'accent-cyan' });

@@ -37,16 +37,18 @@ export function renderSidebar() {
       : '<span class="session-status-dot live"></span>';
 
     // Extract pathname from URL for primary display
-    let displayUrl = s.pageUrl || 'unknown';
+    // Fall back to lastScanData URL if pageUrl is not set
+    const effectiveUrl = s.pageUrl || (s.lastScanData && s.lastScanData.url) || '';
+    let displayUrl = effectiveUrl || 'unknown';
     try {
-      if (s.pageUrl) {
-        const u = new URL(s.pageUrl);
+      if (effectiveUrl) {
+        const u = new URL(effectiveUrl);
         displayUrl = u.pathname || '/';
       }
     } catch {}
 
     div.innerHTML =
-      '<div class="session-url" title="' + escapeHtml(s.pageUrl || '') + '">' +
+      '<div class="session-url" title="' + escapeHtml(effectiveUrl) + '">' +
         statusDot + escapeHtml(displayUrl) +
       '</div>' +
       '<div class="session-id">' + shortId + '...</div>' +

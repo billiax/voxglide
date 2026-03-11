@@ -573,6 +573,16 @@ function handleToolProgress(tracked: TrackedSession, msg: any): void {
 function handleScan(tracked: TrackedSession, msg: any): void {
   const scanData = msg.data || {};
   tracked.lastScanData = scanData;
+
+  // Update pageUrl from scan data (tracks current page after SPA navigation)
+  if (scanData.url && scanData.url !== tracked.pageUrl) {
+    tracked.pageUrl = scanData.url;
+    broadcastToAdmins({
+      type: 'session.update',
+      session: getSessionSummary(tracked),
+    });
+  }
+
   logSessionEvent(tracked, 'scan', scanData);
 }
 

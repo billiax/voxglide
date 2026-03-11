@@ -51,6 +51,8 @@ export class ProxySession {
       try {
         this.debug({ direction: 'info', kind: 'connection', payload: { url: this.config.serverUrl } });
 
+        let settled = false;
+
         this.ws = new WebSocket(this.config.serverUrl);
 
         this.ws.onopen = () => {
@@ -63,6 +65,7 @@ export class ProxySession {
             config: {
               systemInstruction: this.config.systemInstruction,
               tools: this.config.tools,
+              pageUrl: typeof window !== 'undefined' ? window.location.href : undefined,
             },
           });
         };
@@ -76,18 +79,22 @@ export class ProxySession {
           }
 
           this.debug({ direction: 'recv', kind: msg.type, payload: msg });
-          this.handleMessage(msg, resolve);
+          this.handleMessage(msg, () => {
+            if (!settled) { settled = true; resolve(); }
+          });
         };
 
         this.ws.onclose = () => {
           this.debug({ direction: 'recv', kind: 'session', payload: { event: 'close' } });
           this.callbacks.onStatusChange('disconnected');
+          // Reject if WS closed before session.started was received
+          if (!settled) { settled = true; reject(new Error('WebSocket closed before session started')); }
         };
 
         this.ws.onerror = (err) => {
           this.debug({ direction: 'error', kind: 'session', payload: { error: err } });
           this.callbacks.onError('WebSocket connection error');
-          reject(new Error('WebSocket connection error'));
+          if (!settled) { settled = true; reject(new Error('WebSocket connection error')); }
         };
       } catch (err: any) {
         reject(err);
@@ -213,6 +220,12 @@ export class ProxySession {
     });
   }
 
+  private notifySpeechState(): void {
+    const active = this.speechCapture?.isRunning() ?? false;
+    const paused = this.speechCapture?.isPaused() ?? false;
+    this.callbacks.onSpeechStateChange?.(active, paused);
+  }
+
   private startSpeechCapture(): void {
     this.speechCapture = new SpeechCapture(this.config.languageCode);
     this.speechCapture.start(
@@ -227,8 +240,10 @@ export class ProxySession {
       },
       (listening) => {
         this.debug({ direction: 'info', kind: 'speech', payload: { listening } });
+        this.notifySpeechState();
       },
     );
+    this.notifySpeechState();
   }
 
   /**
@@ -367,6 +382,7 @@ export class ProxySession {
     if (this.speechCapture) {
       this.speechCapture.stop();
       this.speechCapture = null;
+      this.notifySpeechState();
     }
 
     // Clear send queue — stale messages should not be sent on next connection
@@ -429,6 +445,7 @@ export class ProxySession {
   pauseSpeech(): void {
     this.ttsPaused = true;
     this.speechCapture?.pause();
+    this.notifySpeechState();
   }
 
   /**
@@ -440,6 +457,7 @@ export class ProxySession {
     if (!this.textInputActive) {
       this.speechCapture?.resume();
     }
+    this.notifySpeechState();
   }
 
   /**
@@ -448,6 +466,7 @@ export class ProxySession {
   pauseSpeechForTextInput(): void {
     this.textInputActive = true;
     this.speechCapture?.pause();
+    this.notifySpeechState();
   }
 
   /**
@@ -459,6 +478,23 @@ export class ProxySession {
     if (!this.ttsPaused) {
       this.speechCapture?.resume();
     }
+    this.notifySpeechState();
+  }
+
+  /**
+   * Retry speech recognition (e.g. after a user gesture when auto-start failed).
+   * Resets recovery state and attempts immediately.
+   */
+  retrySpeech(): void {
+    if (!this.speechCapture) {
+      // Speech was never started or config disabled it — start fresh
+      if (this.config.speechEnabled) {
+        this.startSpeechCapture();
+      }
+      return;
+    }
+    this.speechCapture.retrySpeech();
+    this.notifySpeechState();
   }
 
   isConnected(): boolean {

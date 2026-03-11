@@ -18,6 +18,8 @@ export class UIManager {
   private abortController = new AbortController();
   private stateMachine: UIStateMachine;
   private destroyed = false;
+  private hostGuardInterval: ReturnType<typeof setInterval> | null = null;
+  private bodyObserver: MutationObserver | null = null;
 
   constructor(
     config: UIConfig = {},
@@ -104,11 +106,58 @@ export class UIManager {
         this.focusInput();
       }
     }, { signal: this.abortController.signal });
+
+    // Start host self-healing: re-attach UI if removed from DOM by SPA navigation
+    this.startHostGuard();
+  }
+
+  /**
+   * Watch for the host element being removed from the DOM and re-attach it.
+   * SPAs (React, Vue, Angular) may remove body children during route transitions.
+   * Uses MutationObserver for immediate detection + interval as fallback.
+   */
+  private startHostGuard(): void {
+    // MutationObserver detects direct removal of the host from document.body
+    if (typeof MutationObserver !== 'undefined') {
+      this.bodyObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          for (const removed of mutation.removedNodes) {
+            if (removed === this.host) {
+              this.ensureAttached();
+              return;
+            }
+          }
+        }
+      });
+      this.bodyObserver.observe(document.body, { childList: true });
+    }
+
+    // Fallback interval: covers cases where body.innerHTML is replaced
+    // (which disconnects the MutationObserver itself)
+    this.hostGuardInterval = setInterval(() => this.ensureAttached(), 500);
+  }
+
+  /**
+   * Re-attach the host to document.body if it was removed.
+   * The Shadow DOM and all its children are preserved in memory.
+   */
+  ensureAttached(): void {
+    if (this.destroyed) return;
+    if (!this.host.isConnected) {
+      document.body.appendChild(this.host);
+      // Re-observe body if the observer was disconnected
+      this.bodyObserver?.observe(document.body, { childList: true });
+    }
   }
 
   setConnectionState(state: ConnectionStateValue): void {
     if (this.destroyed) return;
     this.stateMachine.setConnection(state);
+  }
+
+  setSpeechState(active: boolean, paused: boolean): void {
+    if (this.destroyed) return;
+    this.stateMachine.setSpeechState(active, paused);
   }
 
   addTranscript(event: TranscriptEvent): void {
@@ -211,6 +260,12 @@ export class UIManager {
     if (this.destroyed) return;
     this.destroyed = true;
     this.abortController.abort();
+    if (this.hostGuardInterval) {
+      clearInterval(this.hostGuardInterval);
+      this.hostGuardInterval = null;
+    }
+    this.bodyObserver?.disconnect();
+    this.bodyObserver = null;
     this.stateMachine.markDestroyed();
     this.button.destroy();
     this.transcript?.destroy();

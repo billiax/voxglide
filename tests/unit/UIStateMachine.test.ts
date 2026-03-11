@@ -4,7 +4,7 @@ import { ConnectionState } from '../../src/constants';
 
 describe('UIStateMachine', () => {
   describe('initial state', () => {
-    it('starts with DISCONNECTED, panel hidden, no thinking', () => {
+    it('starts with DISCONNECTED, panel hidden, no thinking, speech inactive', () => {
       const sm = new UIStateMachine('voice');
       const state = sm.getState();
       expect(state.connection).toBe(ConnectionState.DISCONNECTED);
@@ -12,6 +12,8 @@ describe('UIStateMachine', () => {
       expect(state.inputMode).toBe('voice');
       expect(state.aiThinking).toBe(false);
       expect(state.activeTool).toBeNull();
+      expect(state.speechActive).toBe(false);
+      expect(state.speechPaused).toBe(false);
       expect(state.destroyed).toBe(false);
     });
 
@@ -35,11 +37,76 @@ describe('UIStateMachine', () => {
       expect(sm.getState().panelVisible).toBe(true);
     });
 
+    it('resets speech state on disconnect', () => {
+      const sm = new UIStateMachine('voice');
+      sm.setConnection(ConnectionState.CONNECTED);
+      sm.setSpeechState(true, false);
+      expect(sm.getState().speechActive).toBe(true);
+
+      sm.setConnection(ConnectionState.DISCONNECTED);
+      expect(sm.getState().speechActive).toBe(false);
+      expect(sm.getState().speechPaused).toBe(false);
+    });
+
+    it('resets speech state on error', () => {
+      const sm = new UIStateMachine('voice');
+      sm.setConnection(ConnectionState.CONNECTED);
+      sm.setSpeechState(true, true);
+
+      sm.setConnection(ConnectionState.ERROR);
+      expect(sm.getState().speechActive).toBe(false);
+      expect(sm.getState().speechPaused).toBe(false);
+    });
+
     it('does nothing when destroyed', () => {
       const sm = new UIStateMachine('voice');
       sm.markDestroyed();
       sm.setConnection(ConnectionState.CONNECTED);
       expect(sm.getState().connection).toBe(ConnectionState.DISCONNECTED);
+    });
+  });
+
+  describe('setSpeechState()', () => {
+    it('sets speech active and paused state', () => {
+      const sm = new UIStateMachine('voice');
+      sm.setSpeechState(true, false);
+      expect(sm.getState().speechActive).toBe(true);
+      expect(sm.getState().speechPaused).toBe(false);
+    });
+
+    it('sets speech paused', () => {
+      const sm = new UIStateMachine('voice');
+      sm.setSpeechState(true, true);
+      expect(sm.getState().speechActive).toBe(true);
+      expect(sm.getState().speechPaused).toBe(true);
+    });
+
+    it('notifies listeners', () => {
+      const sm = new UIStateMachine('voice');
+      const listener = vi.fn();
+      sm.subscribe(listener);
+
+      sm.setSpeechState(true, false);
+      expect(listener).toHaveBeenCalledTimes(1);
+      const [current, previous] = listener.mock.calls[0];
+      expect(current.speechActive).toBe(true);
+      expect(previous.speechActive).toBe(false);
+    });
+
+    it('does not notify when state unchanged', () => {
+      const sm = new UIStateMachine('voice');
+      const listener = vi.fn();
+      sm.subscribe(listener);
+
+      sm.setSpeechState(false, false); // same as initial
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when destroyed', () => {
+      const sm = new UIStateMachine('voice');
+      sm.markDestroyed();
+      sm.setSpeechState(true, false);
+      expect(sm.getState().speechActive).toBe(false);
     });
   });
 
@@ -154,6 +221,9 @@ describe('UIStateMachine', () => {
 
       sm.setActiveTool('test');
       expect(sm.getState().activeTool).toBeNull();
+
+      sm.setSpeechState(true, false);
+      expect(sm.getState().speechActive).toBe(false);
     });
 
     it('does not notify listeners after destroyed', () => {

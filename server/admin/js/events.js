@@ -18,6 +18,25 @@ function getFilterCategory(eventType) {
 
 const filterLabels = { user: 'User', ai: 'AI', tools: 'Tools', scans: 'Scans', system: 'System' };
 
+/**
+ * Resolve an element description by index from the latest scan data.
+ * Used to annotate clickElement/fillField tool calls with the actual element name.
+ */
+function resolveElementNameByIndex(index) {
+  if (!state.selectedSessionId || !state.sessions.has(state.selectedSessionId)) return null;
+  const session = state.sessions.get(state.selectedSessionId);
+  // Find the most recent scan event
+  for (let i = session.events.length - 1; i >= 0; i--) {
+    const ev = session.events[i];
+    if (ev.type === 'scan' && ev.data && Array.isArray(ev.data.interactiveElements)) {
+      const el = ev.data.interactiveElements.find(e => e.index === index);
+      if (el) return el.description || null;
+      break;
+    }
+  }
+  return null;
+}
+
 // ── Event Grouping (pure function) ──
 function groupEvents(events) {
   const groups = [];
@@ -368,10 +387,18 @@ function renderEventItem(event) {
       break;
     case 'toolCall':
       if (event.data.functionCalls) {
-        content = event.data.functionCalls.map(fc =>
-          '<span class="tool-name">' + escapeHtml(fc.name) + '</span>' +
-          '<div class="tool-args">' + escapeHtml(JSON.stringify(fc.args, null, 2)) + '</div>'
-        ).join('<br>');
+        content = event.data.functionCalls.map(fc => {
+          let argsHtml = '<div class="tool-args">' + escapeHtml(JSON.stringify(fc.args, null, 2)) + '</div>';
+          // Resolve element name from scan data for clickElement/fillField with index
+          if ((fc.name === 'clickElement' || fc.name === 'fillField') && fc.args && fc.args.index != null) {
+            const elName = resolveElementNameByIndex(fc.args.index);
+            if (elName) {
+              argsHtml += '<div class="tool-resolved" style="color:var(--text-muted);font-size:11px;margin-top:2px">' +
+                '\u2192 ' + escapeHtml(elName) + '</div>';
+            }
+          }
+          return '<span class="tool-name">' + escapeHtml(fc.name) + '</span>' + argsHtml;
+        }).join('<br>');
       }
       break;
     case 'toolResult':

@@ -8,6 +8,8 @@ export interface UIState {
   inputMode: InputMode;
   aiThinking: boolean;
   activeTool: string | null;
+  speechActive: boolean;
+  speechPaused: boolean;
   destroyed: boolean;
 }
 
@@ -24,6 +26,8 @@ export class UIStateMachine {
       inputMode,
       aiThinking: false,
       activeTool: null,
+      speechActive: false,
+      speechPaused: false,
       destroyed: false,
     };
   }
@@ -48,6 +52,19 @@ export class UIStateMachine {
     if (connection === ConnectionState.CONNECTED) {
       this.state.panelVisible = true;
     }
+    // Reset speech state on disconnect/error
+    if (connection === ConnectionState.DISCONNECTED || connection === ConnectionState.ERROR) {
+      this.state.speechActive = false;
+      this.state.speechPaused = false;
+    }
+    this.notify(previous);
+  }
+
+  setSpeechState(active: boolean, paused: boolean): void {
+    if (this.state.destroyed) return;
+    if (this.state.speechActive === active && this.state.speechPaused === paused) return;
+    const previous = { ...this.state };
+    this.state = { ...this.state, speechActive: active, speechPaused: paused };
     this.notify(previous);
   }
 
