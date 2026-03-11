@@ -1,43 +1,135 @@
-const scriptUrlInput = document.getElementById('scriptUrl');
-const codeArea = document.getElementById('code');
+const serverUrlInput = document.getElementById('serverUrl');
+const optAutoContext = document.getElementById('optAutoContext');
+const optTts = document.getElementById('optTts');
+const optDebug = document.getElementById('optDebug');
+const contextArea = document.getElementById('context');
 const autoInjectToggle = document.getElementById('autoInject');
+const previewEl = document.getElementById('preview');
 const injectBtn = document.getElementById('inject');
 const statusEl = document.getElementById('status');
 
-// Load saved state
-chrome.storage.local.get(['scriptUrl', 'injectCode', 'autoInject'], (data) => {
-  scriptUrlInput.value = data.scriptUrl || '';
-  codeArea.value = data.injectCode || '';
+// --- URL helpers ---
+
+function parseServerUrl(raw) {
+  let url = raw.trim();
+  if (!url) return null;
+
+  // Add protocol if missing
+  if (!/^https?:\/\//.test(url) && !/^wss?:\/\//.test(url)) {
+    url = 'https://' + url;
+  }
+
+  try {
+    const parsed = new URL(url);
+    const isSecure = parsed.protocol === 'https:' || parsed.protocol === 'wss:';
+    const httpBase = `${isSecure ? 'https' : 'http'}://${parsed.host}`;
+    const wsBase = `${isSecure ? 'wss' : 'ws'}://${parsed.host}`;
+    return { httpBase, wsBase };
+  } catch {
+    return null;
+  }
+}
+
+function getScriptUrl(parsed) {
+  return `${parsed.httpBase}/sdk/voice-sdk.iife.js`;
+}
+
+function getInitCode(parsed, options) {
+  const config = { serverUrl: `'${parsed.wsBase}'` };
+  if (options.autoContext) config.autoContext = 'true';
+  if (options.tts) config.tts = 'true';
+  if (options.debug) config.debug = 'true';
+  if (options.context) config.context = `'${options.context.replace(/'/g, "\\'")}'`;
+
+  const entries = Object.entries(config)
+    .map(([k, v]) => `  ${k}: ${v}`)
+    .join(',\n');
+
+  return `new VoiceSDK({\n${entries}\n});`;
+}
+
+function getOptions() {
+  return {
+    autoContext: optAutoContext.checked,
+    tts: optTts.checked,
+    debug: optDebug.checked,
+    context: contextArea.value.trim(),
+  };
+}
+
+// --- Preview ---
+
+function updatePreview() {
+  const parsed = parseServerUrl(serverUrlInput.value);
+  if (!parsed) {
+    previewEl.innerHTML = '<span class="empty-hint">Enter a server URL to see preview</span>';
+    return;
+  }
+
+  const options = getOptions();
+  const scriptUrl = getScriptUrl(parsed);
+  const initCode = getInitCode(parsed, options);
+
+  previewEl.innerHTML =
+    `<span class="key">Script:</span> <span class="url">${escapeHtml(scriptUrl)}</span>\n\n` +
+    `<span class="key">Init:</span>\n${escapeHtml(initCode)}`;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// --- Persistence ---
+
+const STORAGE_KEYS = ['serverUrl', 'optAutoContext', 'optTts', 'optDebug', 'context', 'autoInject'];
+
+function saveAll() {
+  chrome.storage.local.set({
+    serverUrl: serverUrlInput.value,
+    optAutoContext: optAutoContext.checked,
+    optTts: optTts.checked,
+    optDebug: optDebug.checked,
+    context: contextArea.value,
+    autoInject: autoInjectToggle.checked,
+  });
+}
+
+chrome.storage.local.get(STORAGE_KEYS, (data) => {
+  serverUrlInput.value = data.serverUrl || '';
+  optAutoContext.checked = data.optAutoContext !== undefined ? data.optAutoContext : true;
+  optTts.checked = data.optTts !== undefined ? data.optTts : true;
+  optDebug.checked = !!data.optDebug;
+  contextArea.value = data.context || '';
   autoInjectToggle.checked = !!data.autoInject;
+  updatePreview();
 });
 
-// Save on change
-scriptUrlInput.addEventListener('input', () => {
-  chrome.storage.local.set({ scriptUrl: scriptUrlInput.value });
-});
+// Save & update preview on any change
+for (const el of [serverUrlInput, contextArea]) {
+  el.addEventListener('input', () => { saveAll(); updatePreview(); });
+}
+for (const el of [optAutoContext, optTts, optDebug, autoInjectToggle]) {
+  el.addEventListener('change', () => { saveAll(); updatePreview(); });
+}
 
-codeArea.addEventListener('input', () => {
-  chrome.storage.local.set({ injectCode: codeArea.value });
-});
+// --- Inject ---
 
-autoInjectToggle.addEventListener('change', () => {
-  chrome.storage.local.set({ autoInject: autoInjectToggle.checked });
-});
-
-// Inject now button
 injectBtn.addEventListener('click', () => {
-  const scriptUrl = scriptUrlInput.value.trim();
-  const code = codeArea.value.trim();
-  if (!scriptUrl && !code) {
-    statusEl.textContent = 'Nothing to inject';
+  const parsed = parseServerUrl(serverUrlInput.value);
+  if (!parsed) {
+    statusEl.textContent = 'Enter a valid server URL';
     return;
   }
 
   statusEl.textContent = 'Injecting...';
 
+  const options = getOptions();
+  const scriptUrl = getScriptUrl(parsed);
+  const initCode = getInitCode(parsed, options);
+
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     chrome.runtime.sendMessage(
-      { action: 'inject', tabId: tabs[0].id, scriptUrl, code },
+      { action: 'inject', tabId: tabs[0].id, scriptUrl, initCode },
       (response) => {
         if (response?.success) {
           statusEl.textContent = 'Injected';

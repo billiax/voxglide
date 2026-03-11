@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Code Injector",
-  "description": "Inject any script into any web page",
-  "version": "0.1.0",
+  "name": "VoxGlide",
+  "description": "Inject VoxGlide voice AI into any web page",
+  "version": "0.2.0",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": {
