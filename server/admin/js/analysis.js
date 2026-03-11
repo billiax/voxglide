@@ -1,6 +1,9 @@
 import { state, getDomRefs, renderers } from './state.js';
 import { escapeHtml, formatTime, formatDuration, chevronIcon } from './utils.js';
 
+let currentSearchQuery = '';
+let searchTimeout = null;
+
 function getScanEvents(sessionId) {
   if (!sessionId || !state.sessions.has(sessionId)) return [];
   return state.sessions.get(sessionId).events.filter(e => e.type === 'scan' && e.data);
@@ -56,7 +59,6 @@ function groupElementsByCategory(elements) {
     }
   }
 
-  // "Other" category for anything not assigned
   const others = elements.filter((_, i) => !assigned.has(i));
   if (others.length > 0) {
     result.push({ key: 'other', label: 'Other', items: others });
@@ -73,6 +75,25 @@ function isButton(el) {
   const tag = (el.tagName || '').toLowerCase();
   const role = (el.role || '').toLowerCase();
   return tag === 'button' || role === 'button' || tag === 'a' || role === 'menuitem';
+}
+
+// ── Build search text for an element ──
+function buildElementSearchText(el) {
+  const parts = [el.description, el.tagName, el.role];
+  if (Array.isArray(el.capabilities)) parts.push(...el.capabilities);
+  if (el.state) {
+    for (const [k, v] of Object.entries(el.state)) {
+      parts.push(k, String(v));
+    }
+  }
+  if (el.selector) parts.push(el.selector);
+  return parts.filter(Boolean).join(' ').toLowerCase();
+}
+
+function buildFormSearchText(f) {
+  const parts = [f.id, f.name, f.type, f.label, f.value, f.placeholder];
+  if (f.options) parts.push(...f.options);
+  return parts.filter(Boolean).join(' ').toLowerCase();
 }
 
 // ── Render capability badges ──
@@ -94,7 +115,9 @@ function renderElementCard(el) {
     ? Object.entries(el.state).map(p => escapeHtml(p[0]) + '=' + escapeHtml(p[1])).join(', ')
     : '';
 
-  let html = '<div class="element-card">';
+  const searchText = buildElementSearchText(el);
+
+  let html = '<div class="element-card" data-search-text="' + escapeHtml(searchText) + '">';
   if (vpDot) {
     html += '<div class="element-card-viewport">' + vpDot + '</div>';
   }
@@ -129,6 +152,274 @@ function renderElementGroup(category, defaultExpanded) {
   return html;
 }
 
+// ── Search bar HTML ──
+function renderSearchBar() {
+  return '<div class="search-bar">' +
+    '<div class="search-input-wrapper">' +
+      '<svg class="search-icon" viewBox="0 0 16 16" width="14" height="14" fill="currentColor">' +
+        '<path d="M11.5 7a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0zm-.82 4.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06l-3.04-3.04z"/>' +
+      '</svg>' +
+      '<input class="search-input" type="text" placeholder="Search elements, forms, headings\u2026  ( / )" />' +
+      '<button class="search-clear" title="Clear search">&times;</button>' +
+    '</div>' +
+    '<div class="search-results-summary"></div>' +
+  '</div>';
+}
+
+// ── Search highlighting ──
+function highlightInTextEl(el, query) {
+  const text = el._origText !== undefined ? el._origText : el.textContent;
+  el._origText = text;
+  const lower = text.toLowerCase();
+  const q = query.toLowerCase();
+
+  let result = '';
+  let lastIdx = 0;
+  let pos = lower.indexOf(q);
+  while (pos >= 0) {
+    result += escapeHtml(text.substring(lastIdx, pos));
+    result += '<mark>' + escapeHtml(text.substring(pos, pos + q.length)) + '</mark>';
+    lastIdx = pos + q.length;
+    pos = lower.indexOf(q, lastIdx);
+  }
+  result += escapeHtml(text.substring(lastIdx));
+  el.innerHTML = result;
+}
+
+function clearHighlight(el) {
+  if (el._origText !== undefined) {
+    el.textContent = el._origText;
+    delete el._origText;
+  }
+}
+
+function highlightHeadingItem(el, query) {
+  const levelSpan = el.querySelector('.heading-level');
+  const levelHtml = levelSpan ? levelSpan.outerHTML : '';
+  // Extract text after the heading level span
+  const rawText = el._origHeadingText !== undefined ? el._origHeadingText : el.textContent.replace(/^H\d\s*/, '');
+  el._origHeadingText = rawText;
+
+  const lower = rawText.toLowerCase();
+  const q = query.toLowerCase();
+  let result = '';
+  let lastIdx = 0;
+  let pos = lower.indexOf(q);
+  while (pos >= 0) {
+    result += escapeHtml(rawText.substring(lastIdx, pos));
+    result += '<mark>' + escapeHtml(rawText.substring(pos, pos + q.length)) + '</mark>';
+    lastIdx = pos + q.length;
+    pos = lower.indexOf(q, lastIdx);
+  }
+  result += escapeHtml(rawText.substring(lastIdx));
+  el.innerHTML = levelHtml + result;
+}
+
+function clearHeadingHighlight(el) {
+  if (el._origHeadingText !== undefined) {
+    const levelSpan = el.querySelector('.heading-level');
+    const levelHtml = levelSpan ? levelSpan.outerHTML : '';
+    el.innerHTML = levelHtml + escapeHtml(el._origHeadingText);
+    delete el._origHeadingText;
+  }
+}
+
+// ── Cross-scan search ──
+function searchCrossScans(query) {
+  const scanEvents = getScanEvents(state.selectedSessionId);
+  const currentIdx = state.selectedScanIndex < 0 ? scanEvents.length - 1 : Math.min(state.selectedScanIndex, scanEvents.length - 1);
+  const results = [];
+
+  for (let i = 0; i < scanEvents.length; i++) {
+    if (i === currentIdx) continue;
+    const scan = scanEvents[i].data;
+    let matchCount = 0;
+
+    if (Array.isArray(scan.interactiveElements)) {
+      for (const el of scan.interactiveElements) {
+        if (buildElementSearchText(el).includes(query)) matchCount++;
+      }
+    }
+    if (Array.isArray(scan.forms)) {
+      for (const f of scan.forms) {
+        if (buildFormSearchText(f).includes(query)) matchCount++;
+      }
+    }
+    if (Array.isArray(scan.headings)) {
+      for (const h of scan.headings) {
+        if ((h.text || '').toLowerCase().includes(query)) matchCount++;
+      }
+    }
+
+    if (matchCount > 0) {
+      let displayUrl = scan.url || 'unknown';
+      try { if (scan.url) displayUrl = new URL(scan.url).pathname || '/'; } catch {}
+      results.push({ scanIdx: i, displayUrl, matchCount, timestamp: scanEvents[i].timestamp });
+    }
+  }
+
+  return results;
+}
+
+// ── Apply search ──
+function applySearch(query) {
+  const { analysisPanel } = getDomRefs();
+  const q = query.trim().toLowerCase();
+  currentSearchQuery = query.trim();
+
+  const summaryEl = analysisPanel.querySelector('.search-results-summary');
+  const clearBtn = analysisPanel.querySelector('.search-clear');
+  if (clearBtn) clearBtn.style.display = q ? 'flex' : 'none';
+
+  // Clear all search state
+  analysisPanel.querySelectorAll('.search-hidden').forEach(el => el.classList.remove('search-hidden'));
+
+  // Clear highlights
+  analysisPanel.querySelectorAll('.element-card-desc').forEach(clearHighlight);
+  analysisPanel.querySelectorAll('.heading-item').forEach(clearHeadingHighlight);
+
+  // Restore element group counts
+  analysisPanel.querySelectorAll('.element-group').forEach(group => {
+    const countEl = group.querySelector('.element-group-count');
+    if (countEl && countEl._origCount !== undefined) {
+      countEl.textContent = countEl._origCount;
+      delete countEl._origCount;
+    }
+  });
+
+  // Restore section visibility
+  analysisPanel.querySelectorAll('.analysis-section.search-hidden-section').forEach(s => {
+    s.classList.remove('search-hidden-section');
+  });
+
+  if (!q) {
+    if (summaryEl) summaryEl.innerHTML = '';
+    return;
+  }
+
+  // Search through all searchable elements
+  const searchableEls = analysisPanel.querySelectorAll('[data-search-text]');
+  const sectionMatches = new Map(); // section title -> count
+
+  for (const el of searchableEls) {
+    const text = el.dataset.searchText;
+    if (text.includes(q)) {
+      // Find parent section title
+      const section = el.closest('.analysis-section');
+      if (section) {
+        const titleEl = section.querySelector('.analysis-section-title');
+        const title = titleEl ? titleEl.textContent : 'Other';
+        sectionMatches.set(title, (sectionMatches.get(title) || 0) + 1);
+      }
+
+      // Auto-expand parent element group
+      const group = el.closest('.element-group');
+      if (group && group.classList.contains('collapsed')) {
+        group.classList.remove('collapsed');
+        const chev = group.querySelector('.chevron');
+        if (chev) chev.style.transform = 'rotate(0deg)';
+      }
+
+      // Highlight matching text
+      const desc = el.querySelector('.element-card-desc');
+      if (desc) highlightInTextEl(desc, q);
+      if (el.classList.contains('heading-item')) highlightHeadingItem(el, q);
+    } else {
+      el.classList.add('search-hidden');
+    }
+  }
+
+  // Update element group visibility and counts
+  analysisPanel.querySelectorAll('.element-group').forEach(group => {
+    const allCards = group.querySelectorAll('.element-card');
+    const visibleCards = group.querySelectorAll('.element-card:not(.search-hidden)');
+    if (visibleCards.length === 0) {
+      group.classList.add('search-hidden');
+    } else {
+      group.classList.remove('search-hidden');
+      const countEl = group.querySelector('.element-group-count');
+      if (countEl) {
+        if (countEl._origCount === undefined) countEl._origCount = countEl.textContent;
+        countEl.textContent = visibleCards.length + '/' + allCards.length;
+      }
+    }
+  });
+
+  // Hide sections with no visible searchable items
+  analysisPanel.querySelectorAll('.analysis-section').forEach(section => {
+    const searchables = section.querySelectorAll('[data-search-text]');
+    if (searchables.length === 0) return; // Section has no searchable items (e.g., page journey)
+    const visible = section.querySelectorAll('[data-search-text]:not(.search-hidden)');
+    // Also check element-groups (which may contain visible cards)
+    const visibleGroups = section.querySelectorAll('.element-group:not(.search-hidden)');
+    if (visible.length === 0 && visibleGroups.length === 0) {
+      section.classList.add('search-hidden-section');
+    }
+  });
+
+  // Hide form table rows that don't match — also check table-container
+  analysisPanel.querySelectorAll('.table-container').forEach(container => {
+    const rows = container.querySelectorAll('tbody tr[data-search-text]');
+    const visibleRows = container.querySelectorAll('tbody tr[data-search-text]:not(.search-hidden)');
+    if (rows.length > 0 && visibleRows.length === 0) {
+      container.classList.add('search-hidden');
+    } else {
+      container.classList.remove('search-hidden');
+    }
+  });
+
+  // Cross-scan search
+  const crossScanResults = searchCrossScans(q);
+  const totalMatches = Array.from(sectionMatches.values()).reduce((a, b) => a + b, 0);
+
+  // Build summary HTML
+  let summaryHtml = '';
+
+  if (totalMatches > 0) {
+    const parts = [];
+    for (const [section, count] of sectionMatches) {
+      parts.push('<strong>' + count + '</strong> in ' + escapeHtml(section));
+    }
+    summaryHtml = '<div class="search-match-info">' +
+      '<span class="search-match-count">' + totalMatches + ' match' + (totalMatches !== 1 ? 'es' : '') + '</span>' +
+      ' &mdash; ' + parts.join(', ') +
+    '</div>';
+  } else {
+    summaryHtml = '<div class="search-no-match">' +
+      '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" style="vertical-align:-1px;margin-right:4px">' +
+        '<path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm9-3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM8 6.5a.75.75 0 0 1 .75.75v4a.75.75 0 0 1-1.5 0v-4A.75.75 0 0 1 8 6.5z"/>' +
+      '</svg>';
+    if (crossScanResults.length > 0) {
+      summaryHtml += 'Not found in this scan';
+    } else {
+      summaryHtml += 'Not found in any scan &mdash; the page scanner may not detect this element';
+    }
+    summaryHtml += '</div>';
+  }
+
+  if (crossScanResults.length > 0) {
+    summaryHtml += '<div class="search-cross-scan">Also found in: ';
+    summaryHtml += crossScanResults.map(r =>
+      '<button class="search-cross-link" data-scan-idx="' + r.scanIdx + '" title="Switch to this scan">' +
+        escapeHtml(r.displayUrl) + ' <span class="search-cross-count">(' + r.matchCount + ')</span>' +
+      '</button>'
+    ).join(' ');
+    summaryHtml += '</div>';
+  }
+
+  if (summaryEl) {
+    summaryEl.innerHTML = summaryHtml;
+
+    // Wire cross-scan clicks
+    summaryEl.querySelectorAll('.search-cross-link[data-scan-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.selectedScanIndex = parseInt(btn.dataset.scanIdx, 10);
+        renderAnalysis(); // currentSearchQuery is preserved and re-applied automatically
+      });
+    });
+  }
+}
+
 // ── Main render ──
 export function renderAnalysis() {
   const { analysisPanel } = getDomRefs();
@@ -154,7 +445,6 @@ export function renderAnalysis() {
   const textEvents = allEvents.filter(e => e.type === 'text').length;
   const toolCallEvents = allEvents.filter(e => e.type === 'toolCall').length;
 
-  // Session duration
   let duration = '';
   if (allEvents.length > 1) {
     const first = allEvents[0].timestamp;
@@ -181,6 +471,9 @@ export function renderAnalysis() {
     html += '</div>';
   }
 
+  // ── Search Bar ──
+  html += renderSearchBar();
+
   // ── 2. Vertical Page Journey ──
   if (pages.length > 1) {
     html += '<div class="analysis-section">';
@@ -189,8 +482,7 @@ export function renderAnalysis() {
 
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i];
-      const isActive = scanEvents.indexOf(page.scans[page.scans.length - 1]) === idx ||
-        (page.scans.some((se, si) => scanEvents.indexOf(se) === idx));
+      const isActive = page.scans.some(se => scanEvents.indexOf(se) === idx);
 
       let displayUrl = page.url;
       try {
@@ -209,7 +501,6 @@ export function renderAnalysis() {
       const timeRange = formatTime(page.firstTime) +
         (page.lastTime !== page.firstTime ? ' - ' + formatTime(page.lastTime) : '');
 
-      // URL change indicator between pages
       if (i > 0) {
         html += '<div class="page-journey-change">';
         html += '<svg viewBox="0 0 10 10"><path d="M5 0v10M2 7l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -217,7 +508,6 @@ export function renderAnalysis() {
         html += '</div>';
       }
 
-      // Find the scan index for the latest scan in this page group
       const latestScanIdx = scanEvents.indexOf(page.scans[page.scans.length - 1]);
 
       html += '<div class="page-journey-card' + (isActive ? ' active' : '') + '" data-page-scan-idx="' + latestScanIdx + '">';
@@ -227,7 +517,6 @@ export function renderAnalysis() {
       if (metaParts.length > 0) html += '<span>' + metaParts.join(', ') + '</span>';
       html += '<span>' + timeRange + '</span>';
 
-      // Element count delta from previous page
       if (i > 0) {
         const prevPage = pages[i - 1];
         const prevElCount = prevPage.scans[prevPage.scans.length - 1].data.interactiveElements
@@ -264,7 +553,7 @@ export function renderAnalysis() {
 
     const categories = groupElementsByCategory(interactive);
     for (let i = 0; i < categories.length; i++) {
-      const expanded = i < 2; // First two non-empty groups expanded
+      const expanded = i < 2;
       html += renderElementGroup(categories[i], expanded);
     }
 
@@ -283,7 +572,8 @@ export function renderAnalysis() {
         ? '<span class="badge badge-green">Yes</span>'
         : '<span class="badge badge-dim">No</span>';
       const disabledBadge = f.disabled ? ' <span class="badge badge-red">disabled</span>' : '';
-      html += '<tr>';
+      const searchText = buildFormSearchText(f);
+      html += '<tr data-search-text="' + escapeHtml(searchText) + '">';
       html += '<td class="mono">' + escapeHtml(f.id || f.name || '-') + '</td>';
       html += '<td><span class="badge badge-blue">' + escapeHtml(f.type || 'text') + '</span></td>';
       html += '<td>' + escapeHtml(f.label || '-') + '</td>';
@@ -306,7 +596,8 @@ export function renderAnalysis() {
     html += '<div class="heading-tree">';
     for (const h of headings) {
       const indent = (h.level - 1) * 20;
-      html += '<div class="heading-item" style="padding-left:' + indent + 'px">';
+      const searchText = ('h' + h.level + ' ' + (h.text || '')).toLowerCase();
+      html += '<div class="heading-item" data-search-text="' + escapeHtml(searchText) + '" style="padding-left:' + indent + 'px">';
       html += '<span class="heading-level">H' + h.level + '</span>';
       html += escapeHtml(h.text);
       html += '</div>';
@@ -335,6 +626,59 @@ export function renderAnalysis() {
       }
     });
   });
+
+  // ── Wire up search ──
+  const searchInput = analysisPanel.querySelector('.search-input');
+  const searchClearBtn = analysisPanel.querySelector('.search-clear');
+
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => applySearch(e.target.value), 150);
+    });
+
+    // Clear button
+    if (searchClearBtn) {
+      searchClearBtn.style.display = 'none';
+      searchClearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        currentSearchQuery = '';
+        applySearch('');
+        searchInput.focus();
+      });
+    }
+
+    // Restore previous search query after re-render
+    if (currentSearchQuery) {
+      searchInput.value = currentSearchQuery;
+      applySearch(currentSearchQuery);
+    }
+  }
+
+  // Keyboard shortcut: / to focus search (when not in input)
+  if (!analysisPanel._searchKeyBound) {
+    analysisPanel._searchKeyBound = true;
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+        const input = analysisPanel.querySelector('.search-input');
+        if (input && analysisPanel.classList.contains('visible')) {
+          e.preventDefault();
+          input.focus();
+        }
+      }
+      // Escape to clear search
+      if (e.key === 'Escape') {
+        const input = analysisPanel.querySelector('.search-input');
+        if (input && document.activeElement === input && input.value) {
+          input.value = '';
+          currentSearchQuery = '';
+          applySearch('');
+        }
+      }
+    });
+  }
 }
 
 // Register renderer
