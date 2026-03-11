@@ -429,6 +429,93 @@ describe('PageContextProvider', () => {
     });
   });
 
+  describe('value-only refresh', () => {
+    it('reuses cached headings/nav for value-only change', async () => {
+      document.body.innerHTML = `
+        <h1>Static Heading</h1>
+        <nav><a href="/home">Home</a></nav>
+        <input id="field" type="text" value="old" />
+      `;
+      provider = new PageContextProvider(true);
+
+      // Initial scan — full (structural)
+      const result1 = await provider.getContext();
+      expect(result1.content).toContain('Static Heading');
+      expect(result1.content).toContain('current="old"');
+
+      // Change value and manually simulate what the debounce does:
+      // set lastChangeType to 'value-only' and mark dirty
+      (document.querySelector('#field') as HTMLInputElement).value = 'new';
+      (provider as any).lastChangeType = 'value-only';
+      provider.markDirty();
+
+      const result2 = await provider.getContext();
+      // Headings should still be present (reused from cache)
+      expect(result2.content).toContain('Static Heading');
+      // Form value should be updated
+      expect(result2.content).toContain('current="new"');
+    });
+
+    it('structural change always does full rescan', async () => {
+      document.body.innerHTML = `
+        <h1>Old Heading</h1>
+        <input id="field" type="text" value="val" />
+      `;
+      provider = new PageContextProvider(true);
+
+      await provider.getContext();
+
+      // Add new heading and simulate structural change
+      document.body.innerHTML = `
+        <h1>New Heading</h1>
+        <h2>Sub Heading</h2>
+        <input id="field" type="text" value="val" />
+      `;
+      (provider as any).lastChangeType = 'structural';
+      provider.markDirty();
+
+      const result = await provider.getContext();
+      expect(result.content).toContain('New Heading');
+      expect(result.content).toContain('Sub Heading');
+    });
+
+    it('first scan is always structural (no cache to reuse)', async () => {
+      document.body.innerHTML = '<h1>Title</h1>';
+      provider = new PageContextProvider(true);
+
+      expect(provider.getLastChangeType()).toBe('structural');
+    });
+  });
+
+  describe('getLastChangeType()', () => {
+    it('returns structural initially', () => {
+      provider = new PageContextProvider(true);
+      expect(provider.getLastChangeType()).toBe('structural');
+    });
+  });
+
+  describe('getSectionFingerprints()', () => {
+    it('returns section fingerprints after getContext()', async () => {
+      document.body.innerHTML = `
+        <h1>Title</h1>
+        <input id="field" type="text" />
+      `;
+      provider = new PageContextProvider(true);
+
+      await provider.getContext();
+
+      const fingerprints = provider.getSectionFingerprints();
+      expect(fingerprints).toBeDefined();
+      expect(typeof fingerprints.header).toBe('string');
+    });
+
+    it('returns empty object before first getContext()', () => {
+      provider = new PageContextProvider(true);
+      const fingerprints = provider.getSectionFingerprints();
+      expect(Object.keys(fingerprints)).toHaveLength(0);
+    });
+  });
+
   describe('destroy()', () => {
     it('disconnects the MutationObserver', () => {
       provider = new PageContextProvider(true);

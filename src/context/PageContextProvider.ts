@@ -19,7 +19,9 @@ export class PageContextProvider implements ContextProvider {
   private dirty = true;
   private observer: MutationObserver | null = null;
   private interactiveScanner: InteractiveElementScanner;
-  private lastFingerprint = '';
+  private lastStructuralFingerprint = '';
+  private lastValueFingerprint = '';
+  private lastChangeType: 'none' | 'value-only' | 'structural' = 'structural';
   private onChangeCallback: (() => void) | null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private tokenBudget: TokenBudget;
@@ -95,13 +97,31 @@ export class PageContextProvider implements ContextProvider {
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
-      const fingerprint = this.interactiveScanner.computeFingerprint();
-      if (fingerprint !== this.lastFingerprint) {
-        this.lastFingerprint = fingerprint;
+      const changeType = this.detectChangeType();
+      if (changeType !== 'none') {
+        this.lastChangeType = changeType;
         this.dirty = true;
         this.onChangeCallback?.();
       }
     }, 300);
+  }
+
+  /**
+   * Detects whether the DOM change is structural (new/removed elements) or value-only (input values changed).
+   */
+  private detectChangeType(): 'none' | 'value-only' | 'structural' {
+    const structural = this.interactiveScanner.computeStructuralFingerprint();
+    const value = this.interactiveScanner.computeValueFingerprint();
+
+    const structuralChanged = structural !== this.lastStructuralFingerprint;
+    const valueChanged = value !== this.lastValueFingerprint;
+
+    this.lastStructuralFingerprint = structural;
+    this.lastValueFingerprint = value;
+
+    if (structuralChanged) return 'structural';
+    if (valueChanged) return 'value-only';
+    return 'none';
   }
 
   async getContext(): Promise<ContextResult> {
@@ -117,6 +137,10 @@ export class PageContextProvider implements ContextProvider {
     let context: PageContext;
     if (cached) {
       context = cached;
+    } else if (this.dirty && this.lastChangeType === 'value-only' && this.cachedContext) {
+      // Value-only change: reuse cached structural data, only re-scan forms + content
+      context = this.valueOnlyRefresh(this.cachedContext);
+      this.contextCache.set(url, fingerprint, context);
     } else {
       context = this.scanPage();
       this.contextCache.set(url, fingerprint, context);
@@ -148,6 +172,39 @@ export class PageContextProvider implements ContextProvider {
       content: this.config.content ? this.scanContent() : '',
       interactiveElements: this.config.interactiveElements ? this.interactiveScanner.scan() : [],
     };
+  }
+
+  /**
+   * Lightweight refresh: reuses cached headings, nav, interactive elements.
+   * Only re-scans forms (for updated values) and content.
+   */
+  private valueOnlyRefresh(cached: PageContext): PageContext {
+    const excludeSelector = this.config.exclude.join(', ') || null;
+
+    return {
+      title: cached.title,
+      description: cached.description,
+      url: cached.url,
+      forms: this.config.forms ? this.scanForms(excludeSelector) : [],
+      headings: cached.headings,
+      navigation: cached.navigation,
+      content: this.config.content ? this.scanContent() : '',
+      interactiveElements: cached.interactiveElements,
+    };
+  }
+
+  /**
+   * Returns the type of the last detected DOM change.
+   */
+  getLastChangeType(): string {
+    return this.lastChangeType;
+  }
+
+  /**
+   * Returns per-section content fingerprints from the last formatContext() call.
+   */
+  getSectionFingerprints(): Record<string, string> {
+    return { ...this.sectionFingerprints };
   }
 
   private scanMeta(): string {
@@ -345,6 +402,13 @@ export class PageContextProvider implements ContextProvider {
 
     // Apply token budget
     const allocated = this.tokenBudget.allocate(sections);
+
+    // Update section fingerprints for change detection
+    this.sectionFingerprints = {};
+    for (const section of allocated) {
+      this.sectionFingerprints[section.name] = sectionHash(section.content);
+    }
+
     return allocated.map((s) => s.content).join('\n\n');
   }
 
@@ -367,4 +431,12 @@ export class PageContextProvider implements ContextProvider {
     this.contextCache.saveToStorage();
     this.cachedContext = null;
   }
+}
+
+function sectionHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return String(hash);
 }
