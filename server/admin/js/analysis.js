@@ -3,6 +3,7 @@ import { escapeHtml, formatTime, formatDuration, chevronIcon } from './utils.js'
 
 let currentSearchQuery = '';
 let searchTimeout = null;
+let screenshotRequestId = 0;
 
 function getScanEvents(sessionId) {
   if (!sessionId || !state.sessions.has(sessionId)) return [];
@@ -114,6 +115,9 @@ function renderElementCard(el) {
   const stateStr = el.state
     ? Object.entries(el.state).map(p => escapeHtml(p[0]) + '=' + escapeHtml(p[1])).join(', ')
     : '';
+  const indexBadge = el.index != null
+    ? '<span class="element-index-badge">' + el.index + '</span>'
+    : '';
 
   const searchText = buildElementSearchText(el);
 
@@ -122,7 +126,7 @@ function renderElementCard(el) {
     html += '<div class="element-card-viewport">' + vpDot + '</div>';
   }
   html += '<div class="element-card-body">';
-  html += '<div class="element-card-desc">' + escapeHtml(el.description || '-') + '</div>';
+  html += '<div class="element-card-desc">' + indexBadge + escapeHtml(el.description || '-') + '</div>';
   html += '<div class="element-card-details">';
   html += '<span class="tag-badge">' + tagDisplay + '</span> ';
   html += caps;
@@ -543,7 +547,25 @@ export function renderAnalysis() {
       html += '<span class="separator">|</span>';
       html += '<span style="color:var(--text-muted);font-size:11px">' + escapeHtml(scan.description) + '</span>';
     }
+    // Refresh screenshot button — only show when session is connected
+    const sessionData = state.sessions.has(state.selectedSessionId) ? state.sessions.get(state.selectedSessionId) : null;
+    const sessionMeta = sessionData ? sessionData.meta : null;
+    if (sessionMeta && !sessionMeta.disconnected) {
+      html += '<button class="screenshot-btn" title="Refresh screenshot from client browser">';
+      html += '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M10.5 0a.5.5 0 0 0 0 1h.793l-2.147 2.146a.5.5 0 0 0 .708.708L12 1.707V2.5a.5.5 0 0 0 1 0v-2a.5.5 0 0 0-.5-.5h-2zM1 7.5A.5.5 0 0 1 1.5 7H5a.5.5 0 0 1 0 1H1.5A.5.5 0 0 1 1 7.5zm0 3A.5.5 0 0 1 1.5 10H5a.5.5 0 0 1 0 1H1.5a.5.5 0 0 1-.5-.5zm.146-6.354a.5.5 0 0 1 .708 0L4 6.293V5.5a.5.5 0 0 1 1 0v2a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h.793L1.146 4.854a.5.5 0 0 1 0-.708z"/></svg>';
+      html += ' Refresh';
+      html += '</button>';
+    }
     html += '</div>';
+
+    // Show existing screenshot if we have one for this URL
+    const existingScreenshot = sessionData && sessionData.screenshots && scan.url
+      ? sessionData.screenshots[scan.url] : null;
+    if (existingScreenshot) {
+      html += '<div class="page-screenshot-container"><img class="page-screenshot" src="data:image/jpeg;base64,' + existingScreenshot + '" alt="Page screenshot" /></div>';
+    } else {
+      html += '<div class="page-screenshot-container"></div>';
+    }
   }
 
   // ── 4. Grouped Interactive Elements ──
@@ -655,6 +677,27 @@ export function renderAnalysis() {
     }
   }
 
+  // ── Wire up screenshot lightbox ──
+  analysisPanel.querySelectorAll('.page-screenshot').forEach(img => {
+    img.addEventListener('click', () => openScreenshotLightbox(img.src));
+  });
+
+  // ── Wire up screenshot button ──
+  const screenshotBtn = analysisPanel.querySelector('.screenshot-btn');
+  if (screenshotBtn) {
+    screenshotBtn.addEventListener('click', () => {
+      if (!state.selectedSessionId || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+      screenshotBtn.disabled = true;
+      screenshotBtn.textContent = 'Capturing...';
+      screenshotRequestId++;
+      state.ws.send(JSON.stringify({
+        type: 'screenshot.request',
+        sessionId: state.selectedSessionId,
+        requestId: String(screenshotRequestId),
+      }));
+    });
+  }
+
   // Keyboard shortcut: / to focus search (when not in input)
   if (!analysisPanel._searchKeyBound) {
     analysisPanel._searchKeyBound = true;
@@ -681,5 +724,61 @@ export function renderAnalysis() {
   }
 }
 
-// Register renderer
+// ── Screenshot handlers ──
+
+function handleScreenshotResult(msg) {
+  const { analysisPanel } = getDomRefs();
+  const container = analysisPanel.querySelector('.page-screenshot-container');
+  if (!container) return;
+
+  container.innerHTML = '<img class="page-screenshot" src="data:image/jpeg;base64,' + msg.image + '" alt="Page screenshot" />';
+  container.querySelector('.page-screenshot').addEventListener('click', function () {
+    openScreenshotLightbox(this.src);
+  });
+
+  // Reset refresh button
+  resetScreenshotBtn();
+}
+
+function handleScreenshotError(msg) {
+  // Only show error for on-demand requests (has requestId)
+  if (!msg.requestId) return;
+
+  const { analysisPanel } = getDomRefs();
+  const container = analysisPanel.querySelector('.page-screenshot-container');
+  if (container) {
+    container.innerHTML = '<div class="screenshot-error">Screenshot failed: ' + escapeHtml(msg.error || 'Unknown error') + '</div>';
+  }
+
+  resetScreenshotBtn();
+}
+
+function resetScreenshotBtn() {
+  const { analysisPanel } = getDomRefs();
+  const btn = analysisPanel.querySelector('.screenshot-btn');
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M10.5 0a.5.5 0 0 0 0 1h.793l-2.147 2.146a.5.5 0 0 0 .708.708L12 1.707V2.5a.5.5 0 0 0 1 0v-2a.5.5 0 0 0-.5-.5h-2zM1 7.5A.5.5 0 0 1 1.5 7H5a.5.5 0 0 1 0 1H1.5A.5.5 0 0 1 1 7.5zm0 3A.5.5 0 0 1 1.5 10H5a.5.5 0 0 1 0 1H1.5a.5.5 0 0 1-.5-.5zm.146-6.354a.5.5 0 0 1 .708 0L4 6.293V5.5a.5.5 0 0 1 1 0v2a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h.793L1.146 4.854a.5.5 0 0 1 0-.708z"/></svg> Refresh';
+  }
+}
+
+// ── Screenshot lightbox ──
+
+function openScreenshotLightbox(src) {
+  const overlay = document.createElement('div');
+  overlay.className = 'screenshot-lightbox';
+  overlay.innerHTML = '<img src="' + src + '" alt="Screenshot preview" />';
+
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', close);
+  document.addEventListener('keydown', function onKey(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
+  });
+
+  document.body.appendChild(overlay);
+}
+
+// Register renderer and screenshot handlers
 renderers.renderAnalysis = renderAnalysis;
+renderers.handleScreenshotResult = handleScreenshotResult;
+renderers.handleScreenshotError = handleScreenshotError;

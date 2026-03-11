@@ -69,6 +69,7 @@ interface TrackedSession {
   turnProcessing: boolean;
   abortController: AbortController | null;
   lastScanData: any | null;
+  screenshots: Map<string, string>; // url -> base64 image (latest per URL)
 }
 
 // ── Session & Admin State ──
@@ -113,6 +114,7 @@ function getSessionSummary(tracked: TrackedSession) {
     messageCount: tracked.messageCount,
     disconnected: tracked.disconnected,
     lastScanData: tracked.lastScanData,
+    screenshots: Object.fromEntries(tracked.screenshots),
   };
 }
 
@@ -263,7 +265,7 @@ const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => 
     return;
   }
 
-  // Serve SDK files from /sdk/
+  // Serve SDK files from /sdk/ (no-cache so dev rebuilds are always picked up)
   if (req.url?.startsWith('/sdk/')) {
     const fileName = path.basename(req.url);
     const filePath = path.join(distDir, fileName);
@@ -278,7 +280,10 @@ const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => 
 
     try {
       const content = fs.readFileSync(filePath);
-      res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] });
+      res.writeHead(200, {
+        'Content-Type': MIME_TYPES[ext],
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      });
       res.end(content);
     } catch {
       res.writeHead(404);
@@ -335,6 +340,26 @@ adminWss.on('connection', (adminWs) => {
       });
     }
   }
+
+  adminWs.on('message', async (raw) => {
+    let msg: any;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+    if (msg.type === 'screenshot.request') {
+      const sessionId = msg.sessionId;
+      if (!sessionId) {
+        sendToClient(adminWs, { type: 'screenshot.error', error: 'No sessionId provided', requestId: msg.requestId });
+        return;
+      }
+      const tracked = trackedSessions.get(sessionId);
+      if (!tracked || !tracked.clientWs || tracked.clientWs.readyState !== WebSocket.OPEN) {
+        sendToClient(adminWs, { type: 'screenshot.error', error: 'Session not connected', requestId: msg.requestId });
+        return;
+      }
+      // Forward request to SDK client
+      sendToClient(tracked.clientWs, { type: 'screenshot.request', requestId: msg.requestId });
+    }
+  });
 
   adminWs.on('close', () => {
     console.log('[voxglide] Admin client disconnected');
@@ -447,6 +472,7 @@ function handleSessionStart(clientWs: WebSocket, msg: any): void {
     turnProcessing: false,
     abortController: null,
     lastScanData: null,
+    screenshots: new Map(),
   };
 
   trackedSessions.set(sessionId, tracked);
@@ -630,6 +656,29 @@ sdkWss.on('connection', (clientWs, req) => {
       case 'scan': handleScan(tracked, msg); break;
       case 'context.update': handleContextUpdate(tracked, msg); break;
       case 'session.stop': handleSessionStop(tracked); break;
+      case 'screenshot': {
+        // Auto or on-demand screenshot from SDK client
+        const url = msg.url || tracked.lastScanData?.url || tracked.pageUrl || '';
+        if (msg.image) {
+          // Keep latest per URL, cap at 20 entries
+          tracked.screenshots.set(url, msg.image);
+          if (tracked.screenshots.size > 20) {
+            const firstKey = tracked.screenshots.keys().next().value!;
+            tracked.screenshots.delete(firstKey);
+          }
+        }
+        broadcastToAdmins({
+          type: 'session.screenshot',
+          sessionId: tracked.id,
+          url,
+          image: msg.image,
+          requestId: msg.requestId,
+        });
+        break;
+      }
+      case 'screenshot.error':
+        broadcastToAdmins({ ...msg, sessionId: tracked.id });
+        break;
       default: sendToClient(clientWs, { type: 'error', message: `Unknown message type: ${msg.type}` });
     }
   });

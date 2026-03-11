@@ -35,16 +35,18 @@ function handleMessage(msg) {
     case 'sessions.list':
       for (const s of msg.sessions) {
         if (!state.sessions.has(s.id)) {
-          state.sessions.set(s.id, { meta: s, events: [] });
+          state.sessions.set(s.id, { meta: s, events: [], screenshots: s.screenshots || {} });
         } else {
-          state.sessions.get(s.id).meta = s;
+          const existing = state.sessions.get(s.id);
+          existing.meta = s;
+          if (s.screenshots) Object.assign(existing.screenshots || (existing.screenshots = {}), s.screenshots);
         }
       }
       renderSidebar();
       break;
 
     case 'session.new':
-      state.sessions.set(msg.session.id, { meta: msg.session, events: [] });
+      state.sessions.set(msg.session.id, { meta: msg.session, events: [], screenshots: {} });
       renderSidebar();
       // Auto-select if no session selected
       if (!state.selectedSessionId) {
@@ -91,6 +93,28 @@ function handleMessage(msg) {
         if (state.selectedSessionId === msg.sessionId) {
           renderSessionHeader();
         }
+      }
+      break;
+
+    case 'session.screenshot': {
+      // Store screenshot on the session (latest per URL)
+      const sess = state.sessions.get(msg.sessionId);
+      if (sess) {
+        if (!sess.screenshots) sess.screenshots = {};
+        if (msg.image) sess.screenshots[msg.url || ''] = msg.image;
+      }
+      // Update analysis view if this is the selected session
+      if (msg.sessionId === state.selectedSessionId) {
+        if (renderers.handleScreenshotResult) {
+          renderers.handleScreenshotResult(msg);
+        }
+      }
+      break;
+    }
+
+    case 'screenshot.error':
+      if (msg.sessionId === state.selectedSessionId && renderers.handleScreenshotError) {
+        renderers.handleScreenshotError(msg);
       }
       break;
   }

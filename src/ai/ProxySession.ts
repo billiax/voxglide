@@ -146,10 +146,71 @@ export class ProxySession {
         this.callbacks.onStatusChange('disconnected');
         break;
 
+      case 'screenshot.request':
+        this.captureAndSendScreenshot(msg.requestId);
+        break;
+
       case 'error':
         this.callbacks.onError(msg.message || 'Server error');
         break;
     }
+  }
+
+  // ── Screenshot capture (non-blocking, for admin monitoring) ──
+
+  private screenshotInProgress = false;
+
+  /**
+   * Capture a screenshot and send it to the server. Non-blocking (fire-and-forget).
+   * Skips if a capture is already in progress. Used both for automatic captures
+   * (page changes) and on-demand requests from the admin dashboard.
+   */
+  captureAndSendScreenshot(requestId?: string): void {
+    if (this.screenshotInProgress) return;
+    this.screenshotInProgress = true;
+
+    this.doScreenshotCapture(requestId).finally(() => {
+      this.screenshotInProgress = false;
+    });
+  }
+
+  private async doScreenshotCapture(requestId?: string): Promise<void> {
+    try {
+      const html2canvas = await this.loadHtml2Canvas();
+      if (!html2canvas) {
+        if (requestId) {
+          this.send({ type: 'screenshot.error', error: 'Failed to load screenshot library', requestId });
+        }
+        return;
+      }
+      const canvas = await html2canvas(document.body, {
+        logging: false,
+        useCORS: true,
+        allowTaint: true,
+        scale: window.devicePixelRatio > 1 ? 0.5 : 0.75,
+        windowWidth: Math.min(document.documentElement.clientWidth, 1440),
+        windowHeight: Math.min(document.documentElement.clientHeight, 900),
+      });
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      const base64 = dataUrl.split(',')[1];
+      this.send({ type: 'screenshot', image: base64, url: window.location.href, requestId });
+    } catch (err: any) {
+      if (requestId) {
+        this.send({ type: 'screenshot.error', error: err.message || 'Screenshot capture failed', requestId });
+      }
+    }
+  }
+
+  private async loadHtml2Canvas(): Promise<any> {
+    if ((window as any).html2canvas) return (window as any).html2canvas;
+
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+      script.onload = () => resolve((window as any).html2canvas);
+      script.onerror = () => resolve(null);
+      document.head.appendChild(script);
+    });
   }
 
   private startSpeechCapture(): void {
