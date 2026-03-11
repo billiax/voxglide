@@ -147,6 +147,32 @@ export class InteractiveElementScanner {
   }
 
   /**
+   * Fingerprint based only on structural DOM signals (element counts).
+   * Does not change when input values change.
+   */
+  computeStructuralFingerprint(): string {
+    const interactiveCount = document.querySelectorAll(INTERACTIVE_SELECTOR).length;
+    const formCount = document.querySelectorAll('form').length;
+    const bodyChildCount = document.body ? document.body.children.length : 0;
+    return `s:${interactiveCount}:${formCount}:${bodyChildCount}`;
+  }
+
+  /**
+   * Fingerprint based only on value/content signals.
+   * Changes when input values or main content length change, but not when elements are added/removed.
+   */
+  computeValueFingerprint(): string {
+    let valueHash = 0;
+    document.querySelectorAll('input, select, textarea').forEach((el) => {
+      const val = (el as HTMLInputElement).value;
+      if (val) valueHash = (valueHash * 31 + simpleHash(val)) | 0;
+    });
+
+    const contentLen = (document.querySelector('main') || document.body)?.textContent?.length || 0;
+    return `v:${valueHash}:${contentLen}`;
+  }
+
+  /**
    * Secondary scan: find elements with cursor:pointer that weren't caught
    * by the selector-based scan. Detects clickable divs/spans/li/etc common
    * in React/Vue/Angular apps with framework-managed event handlers.

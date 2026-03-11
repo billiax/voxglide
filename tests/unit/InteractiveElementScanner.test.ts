@@ -126,6 +126,51 @@ describe('InteractiveElementScanner', () => {
     });
   });
 
+  describe('computeStructuralFingerprint()', () => {
+    it('changes when a button is added', () => {
+      document.body.innerHTML = '<button>One</button>';
+      const fp1 = scanner.computeStructuralFingerprint();
+
+      document.body.innerHTML = '<button>One</button><button>Two</button>';
+      const fp2 = scanner.computeStructuralFingerprint();
+
+      expect(fp1).not.toBe(fp2);
+    });
+
+    it('does not change when input value changes', () => {
+      document.body.innerHTML = '<input type="text" value="old" />';
+      const fp1 = scanner.computeStructuralFingerprint();
+
+      (document.querySelector('input') as HTMLInputElement).value = 'new';
+      const fp2 = scanner.computeStructuralFingerprint();
+
+      expect(fp1).toBe(fp2);
+    });
+  });
+
+  describe('computeValueFingerprint()', () => {
+    it('changes when input value changes', () => {
+      document.body.innerHTML = '<input type="text" value="old" />';
+      const fp1 = scanner.computeValueFingerprint();
+
+      (document.querySelector('input') as HTMLInputElement).value = 'new';
+      const fp2 = scanner.computeValueFingerprint();
+
+      expect(fp1).not.toBe(fp2);
+    });
+
+    it('does not change when an attribute-only change occurs on existing element', () => {
+      document.body.innerHTML = '<div><input type="text" value="stable" /><button id="btn">X</button></div>';
+      const fp1 = scanner.computeValueFingerprint();
+
+      // Change an attribute — not a value change
+      document.getElementById('btn')!.setAttribute('aria-expanded', 'true');
+      const fp2 = scanner.computeValueFingerprint();
+
+      expect(fp1).toBe(fp2);
+    });
+  });
+
   describe('cursor:pointer detection', () => {
     it('detects div elements with cursor:pointer as clickable', () => {
       document.body.innerHTML = `
