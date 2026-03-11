@@ -6,6 +6,9 @@ import type { ContextProvider, ContextResult, ToolDeclaration } from '../types';
  */
 export class ContextEngine {
   private providers = new Map<string, ContextProvider>();
+  private lastSectionFingerprints = new Map<string, string>();
+  private lastCachedPrompt = '';
+  private lastCachedTools: ToolDeclaration[] = [];
 
   addProvider(provider: ContextProvider): void {
     if (!provider.type || !provider.name || !provider.getContext) {
@@ -43,8 +46,7 @@ export class ContextEngine {
     return { sections, tools };
   }
 
-  async buildSystemPrompt(): Promise<string> {
-    const { sections } = await this.buildContext();
+  private formatSections(sections: { type: string; name: string; content: string }[]): string {
     if (sections.length === 0) return '';
 
     const parts = ['=== PAGE CONTEXT ===', ''];
@@ -57,8 +59,74 @@ export class ContextEngine {
     return parts.join('\n');
   }
 
+  async buildSystemPrompt(): Promise<string> {
+    const { sections } = await this.buildContext();
+    return this.formatSections(sections);
+  }
+
   async getTools(): Promise<ToolDeclaration[]> {
     const { tools } = await this.buildContext();
     return tools;
   }
+
+  /**
+   * Combined method: builds system prompt and tools from a single buildContext() call.
+   * Avoids the double-iteration of calling buildSystemPrompt() + getTools() separately.
+   */
+  async buildSystemPromptAndTools(): Promise<{ systemPrompt: string; tools: ToolDeclaration[] }> {
+    const { sections, tools } = await this.buildContext();
+    return { systemPrompt: this.formatSections(sections), tools };
+  }
+
+  /**
+   * Builds system prompt and tools, but returns a `changed` flag indicating
+   * whether any section content differs from the last call.
+   * Uses per-section hashing for efficient change detection.
+   */
+  async buildSystemPromptAndToolsIfChanged(): Promise<{
+    systemPrompt: string;
+    tools: ToolDeclaration[];
+    changed: boolean;
+  }> {
+    const { sections, tools } = await this.buildContext();
+
+    // Compute per-section fingerprints
+    const newFingerprints = new Map<string, string>();
+    for (const section of sections) {
+      newFingerprints.set(section.name, simpleStringHash(section.content));
+    }
+
+    // Compare against last known fingerprints
+    let changed = false;
+    if (newFingerprints.size !== this.lastSectionFingerprints.size) {
+      changed = true;
+    } else {
+      for (const [name, hash] of newFingerprints) {
+        if (this.lastSectionFingerprints.get(name) !== hash) {
+          changed = true;
+          break;
+        }
+      }
+    }
+
+    if (changed) {
+      this.lastSectionFingerprints = newFingerprints;
+      this.lastCachedPrompt = this.formatSections(sections);
+      this.lastCachedTools = tools;
+    }
+
+    return {
+      systemPrompt: this.lastCachedPrompt,
+      tools: this.lastCachedTools,
+      changed,
+    };
+  }
+}
+
+function simpleStringHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return String(hash);
 }

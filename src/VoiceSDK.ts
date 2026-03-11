@@ -168,9 +168,8 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         storedSessionId = pending.sessionId;
       }
 
-      // Build context and system prompt
-      const contextPrompt = await this.contextEngine.buildSystemPrompt();
-      const contextTools = await this.contextEngine.getTools();
+      // Build context and system prompt (single buildContext() call)
+      const { systemPrompt: contextPrompt, tools: contextTools } = await this.contextEngine.buildSystemPromptAndTools();
 
       // Combine built-in + context + custom tool declarations
       const allTools = this.buildToolDeclarations(contextTools);
@@ -421,9 +420,19 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     if (!this.session || this.connectionState !== ConnectionState.CONNECTED) return;
 
     try {
-      const contextPrompt = await this.contextEngine.buildSystemPrompt();
+      // Single buildContext() call with section-level change detection
+      const { systemPrompt: contextPrompt, tools: contextTools, changed } =
+        await this.contextEngine.buildSystemPromptAndToolsIfChanged();
+
       this.wireIndexResolver();
-      const contextTools = await this.contextEngine.getTools();
+
+      if (!changed) {
+        if (this.config.debug) {
+          console.log('[VoiceSDK:context] Skipping context update — no section changes');
+        }
+        return;
+      }
+
       const allTools = this.buildToolDeclarations(contextTools);
       const toolDescriptions = allTools.map((t) => `- ${t.name}: ${t.description}`).join('\n');
 
@@ -432,7 +441,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         .replace('{developerContext}', this.config.context || 'None.')
         .replace('{toolDescriptions}', toolDescriptions || 'None.');
 
-      // Deduplicate: skip if systemInstruction hasn't changed
+      // Deduplicate: skip if systemInstruction hasn't changed (template-level check)
       if (systemInstruction === this.lastSentSystemInstruction) {
         if (this.config.debug) {
           console.log('[VoiceSDK:context] Skipping duplicate context update');

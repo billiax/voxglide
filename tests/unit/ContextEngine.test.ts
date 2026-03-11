@@ -353,4 +353,142 @@ describe('ContextEngine', () => {
       expect(tools).toEqual([]);
     });
   });
+
+  describe('buildSystemPromptAndTools()', () => {
+    it('returns both systemPrompt and tools from a single call', async () => {
+      const engine = new ContextEngine();
+      const tool = createMockTool('my_tool');
+
+      engine.addProvider(createMockProvider(
+        { name: 'nav', type: 'navigation' },
+        { content: 'nav content', tools: [tool] },
+      ));
+
+      const result = await engine.buildSystemPromptAndTools();
+
+      expect(result.systemPrompt).toContain('[nav]');
+      expect(result.systemPrompt).toContain('nav content');
+      expect(result.tools).toHaveLength(1);
+      expect(result.tools[0]).toBe(tool);
+    });
+
+    it('output matches buildSystemPrompt() + getTools() individually', async () => {
+      const engine = new ContextEngine();
+      const tool1 = createMockTool('t1');
+      const tool2 = createMockTool('t2');
+
+      engine.addProvider(createMockProvider(
+        { name: 'forms', type: 'form' },
+        { content: 'form data', tools: [tool1] },
+      ));
+      engine.addProvider(createMockProvider(
+        { name: 'headings', type: 'heading' },
+        { content: 'heading data', tools: [tool2] },
+      ));
+
+      const combined = await engine.buildSystemPromptAndTools();
+      const separatePrompt = await engine.buildSystemPrompt();
+      const separateTools = await engine.getTools();
+
+      expect(combined.systemPrompt).toBe(separatePrompt);
+      expect(combined.tools).toEqual(separateTools);
+    });
+
+    it('returns empty systemPrompt and empty tools when no providers exist', async () => {
+      const engine = new ContextEngine();
+
+      const result = await engine.buildSystemPromptAndTools();
+
+      expect(result.systemPrompt).toBe('');
+      expect(result.tools).toEqual([]);
+    });
+  });
+
+  describe('buildSystemPromptAndToolsIfChanged()', () => {
+    it('returns changed: true on first call', async () => {
+      const engine = new ContextEngine();
+      engine.addProvider(createMockProvider(
+        { name: 'test', type: 'test' },
+        { content: 'hello', tools: [] },
+      ));
+
+      const result = await engine.buildSystemPromptAndToolsIfChanged();
+
+      expect(result.changed).toBe(true);
+      expect(result.systemPrompt).toContain('hello');
+    });
+
+    it('returns changed: false when called again with same provider content', async () => {
+      const engine = new ContextEngine();
+      engine.addProvider(createMockProvider(
+        { name: 'test', type: 'test' },
+        { content: 'stable content', tools: [] },
+      ));
+
+      await engine.buildSystemPromptAndToolsIfChanged();
+      const result = await engine.buildSystemPromptAndToolsIfChanged();
+
+      expect(result.changed).toBe(false);
+      expect(result.systemPrompt).toContain('stable content');
+    });
+
+    it('returns changed: true when provider content changes', async () => {
+      const engine = new ContextEngine();
+      let content = 'version 1';
+      const provider: ContextProvider = {
+        type: 'dynamic',
+        name: 'dynamic',
+        getContext: async () => ({ content, tools: [] }),
+      };
+      engine.addProvider(provider);
+
+      await engine.buildSystemPromptAndToolsIfChanged();
+
+      content = 'version 2';
+      const result = await engine.buildSystemPromptAndToolsIfChanged();
+
+      expect(result.changed).toBe(true);
+      expect(result.systemPrompt).toContain('version 2');
+    });
+
+    it('returns changed: true when a provider is removed', async () => {
+      const engine = new ContextEngine();
+      engine.addProvider(createMockProvider(
+        { name: 'a', type: 'test' },
+        { content: 'section a', tools: [] },
+      ));
+      engine.addProvider(createMockProvider(
+        { name: 'b', type: 'test' },
+        { content: 'section b', tools: [] },
+      ));
+
+      await engine.buildSystemPromptAndToolsIfChanged();
+
+      engine.removeProvider('b');
+      const result = await engine.buildSystemPromptAndToolsIfChanged();
+
+      expect(result.changed).toBe(true);
+      expect(result.systemPrompt).toContain('section a');
+      expect(result.systemPrompt).not.toContain('section b');
+    });
+
+    it('returns changed: true when a provider is added', async () => {
+      const engine = new ContextEngine();
+      engine.addProvider(createMockProvider(
+        { name: 'a', type: 'test' },
+        { content: 'section a', tools: [] },
+      ));
+
+      await engine.buildSystemPromptAndToolsIfChanged();
+
+      engine.addProvider(createMockProvider(
+        { name: 'b', type: 'test' },
+        { content: 'section b', tools: [] },
+      ));
+      const result = await engine.buildSystemPromptAndToolsIfChanged();
+
+      expect(result.changed).toBe(true);
+      expect(result.systemPrompt).toContain('section b');
+    });
+  });
 });
