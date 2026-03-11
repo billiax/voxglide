@@ -125,4 +125,95 @@ describe('InteractiveElementScanner', () => {
       expect(map.has(2)).toBe(true);
     });
   });
+
+  describe('cursor:pointer detection', () => {
+    it('detects div elements with cursor:pointer as clickable', () => {
+      document.body.innerHTML = `
+        <div style="cursor: pointer; display: block;">Folder A</div>
+        <div style="cursor: pointer; display: block;">Folder B</div>
+      `;
+      makeAllVisible();
+      const results = scanner.scan();
+      expect(results.length).toBe(2);
+      expect(results[0].capabilities).toContain('clickable');
+      expect(results[1].capabilities).toContain('clickable');
+    });
+
+    it('does not duplicate elements already matched by selector', () => {
+      document.body.innerHTML = `
+        <button style="cursor: pointer;">Already a button</button>
+        <div style="cursor: pointer; display: block;">Custom clickable</div>
+      `;
+      makeAllVisible();
+      const results = scanner.scan();
+      // button found by selector, div found by cursor:pointer — 2 total, no dupes
+      expect(results.length).toBe(2);
+      const descs = results.map(r => r.description);
+      expect(descs).toContain('Already a button');
+      expect(descs).toContain('Custom clickable');
+    });
+
+    it('picks only outermost cursor:pointer element, not nested children', () => {
+      document.body.innerHTML = `
+        <div style="cursor: pointer; display: block;">
+          <div style="cursor: pointer; display: block;">
+            <span style="cursor: pointer;">Nested text</span>
+          </div>
+        </div>
+      `;
+      makeAllVisible();
+      const results = scanner.scan();
+      // Should find only the outermost div
+      expect(results.length).toBe(1);
+      expect(results[0].description).toContain('Nested text');
+    });
+
+    it('skips cursor:pointer elements inside selector-matched parents', () => {
+      document.body.innerHTML = `
+        <button>
+          <div style="cursor: pointer; display: block;">Inside button</div>
+        </button>
+      `;
+      makeAllVisible();
+      const results = scanner.scan();
+      // Only the button, not the inner div
+      expect(results.length).toBe(1);
+      expect(results[0].tagName).toBe('button');
+    });
+
+    it('skips cursor:pointer elements with no text', () => {
+      document.body.innerHTML = `
+        <div style="cursor: pointer; display: block;"></div>
+        <div style="cursor: pointer; display: block;">Has text</div>
+      `;
+      makeAllVisible();
+      const results = scanner.scan();
+      expect(results.length).toBe(1);
+      expect(results[0].description).toBe('Has text');
+    });
+
+    it('skips cursor:pointer elements inside SDK shadow host', () => {
+      document.body.innerHTML = `
+        <div data-voice-sdk>
+          <div style="cursor: pointer; display: block;">SDK element</div>
+        </div>
+        <div style="cursor: pointer; display: block;">Page element</div>
+      `;
+      makeAllVisible();
+      const results = scanner.scan();
+      expect(results.length).toBe(1);
+      expect(results[0].description).toBe('Page element');
+    });
+
+    it('includes cursor:pointer elements in index map', () => {
+      document.body.innerHTML = `
+        <div id="clickable-div" style="cursor: pointer; display: block;">Click me</div>
+      `;
+      makeAllVisible();
+      scanner.scan();
+      const el = scanner.getElementByIndex(1);
+      expect(el).not.toBeNull();
+      expect(el?.id).toBe('clickable-div');
+    });
+  });
 });
