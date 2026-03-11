@@ -27,6 +27,8 @@ const KEEP_RECENT_TURNS = 6;
 const SESSION_CLEANUP_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_TOOL_DEPTH = 10;
 const MAX_HISTORY_ENTRIES = 200;
+const GEMINI_CACHE_MIN_TOKENS = 32_768;
+const GEMINI_CACHE_TTL = '600s'; // 10 min
 
 // ── Types ──
 
@@ -43,6 +45,9 @@ interface Session {
   lastPromptTokenCount: number;
   lastOutputTokenCount: number;
   conversationSummary: string | null;
+  cachedContentName: string | null;
+  cachedContentHash: string | null;
+  cacheEligible: boolean | null;
 }
 
 interface PendingToolTurn {
@@ -199,6 +204,87 @@ async function maybeSummarizeHistory(session: Session, tracked: TrackedSession):
       session.history.length = 0;
       session.history.push(...kept);
     }
+  }
+}
+
+// ── Gemini Context Caching ──
+
+function hashForCaching(systemInstruction: string, tools: Tool[]): string {
+  const payload = systemInstruction + JSON.stringify(tools);
+  return crypto.createHash('md5').update(payload).digest('hex');
+}
+
+function estimateInstructionTokens(systemInstruction: string, tools: Tool[], history: Content[]): number {
+  let chars = systemInstruction.length + JSON.stringify(tools).length;
+  for (const entry of history) {
+    for (const part of entry.parts || []) {
+      if ((part as any).text) chars += (part as any).text.length;
+      else chars += JSON.stringify(part).length;
+    }
+  }
+  return Math.ceil(chars / 4);
+}
+
+async function createOrUpdateGeminiCache(session: Session, tracked: TrackedSession): Promise<void> {
+  const hash = hashForCaching(session.systemInstruction, session.tools);
+
+  // Cache already matches — nothing to do
+  if (session.cachedContentHash === hash && session.cachedContentName) return;
+
+  const estimatedTokens = estimateInstructionTokens(
+    session.systemInstruction, session.tools, session.history,
+  );
+
+  if (estimatedTokens < GEMINI_CACHE_MIN_TOKENS) {
+    session.cacheEligible = false;
+    // Clean up stale cache if we dropped below threshold (e.g. context got smaller)
+    if (session.cachedContentName) {
+      await cleanupGeminiCache(session);
+    }
+    return;
+  }
+
+  // Clean up old cache before creating new one
+  if (session.cachedContentName) {
+    await cleanupGeminiCache(session);
+  }
+
+  try {
+    const cache = await ai.caches.create({
+      model: GEMINI_MODEL,
+      config: {
+        systemInstruction: session.systemInstruction,
+        tools: session.tools,
+        ttl: GEMINI_CACHE_TTL,
+      },
+    });
+
+    session.cachedContentName = cache.name || null;
+    session.cachedContentHash = hash;
+    session.cacheEligible = true;
+
+    logSessionEvent(tracked, 'cache.created', {
+      cacheName: session.cachedContentName,
+      estimatedTokens,
+    });
+  } catch (err: any) {
+    console.warn('[voxglide] Cache creation failed:', err.message);
+    logSessionEvent(tracked, 'cache.error', { message: err.message });
+    session.cachedContentName = null;
+    session.cachedContentHash = null;
+    session.cacheEligible = false;
+  }
+}
+
+async function cleanupGeminiCache(session: Session): Promise<void> {
+  if (!session.cachedContentName) return;
+  const name = session.cachedContentName;
+  session.cachedContentName = null;
+  session.cachedContentHash = null;
+  try {
+    await ai.caches.delete({ name });
+  } catch {
+    // Fire-and-forget: cache may already be expired
   }
 }
 
@@ -457,6 +543,9 @@ function handleSessionStart(clientWs: WebSocket, msg: any): void {
       lastPromptTokenCount: 0,
       lastOutputTokenCount: 0,
       conversationSummary: null,
+      cachedContentName: null,
+      cachedContentHash: null,
+      cacheEligible: null,
     },
     id: sessionId,
     pageUrl: msg.config?.pageUrl || '',
@@ -595,6 +684,8 @@ function handleContextUpdate(tracked: TrackedSession, msg: any): void {
   const newContext = msg.context || msg.systemInstruction;
   if (newContext) {
     tracked.session.systemInstruction = newContext;
+    // Invalidate cache — will be recreated on next turn if eligible
+    tracked.session.cachedContentHash = null;
   }
   logSessionEvent(tracked, 'context.update', {
     systemInstruction: newContext || '',
@@ -604,6 +695,9 @@ function handleContextUpdate(tracked: TrackedSession, msg: any): void {
 }
 
 function handleSessionStop(tracked: TrackedSession): void {
+  if (tracked.session) {
+    cleanupGeminiCache(tracked.session);
+  }
   tracked.session = null;
   logSessionEvent(tracked, 'session.stop', {});
   sendToClient(tracked.clientWs!, { type: 'session.stopped' });
@@ -630,6 +724,9 @@ function handleWsClose(clientWs: WebSocket): void {
 
   // Clean up after 30 minutes if not reconnected
   tracked.cleanupTimer = setTimeout(() => {
+    if (tracked.session) {
+      cleanupGeminiCache(tracked.session);
+    }
     trackedSessions.delete(tracked.id);
     wsToSessionId.delete(clientWs); // safety cleanup
   }, SESSION_CLEANUP_MS);
@@ -765,16 +862,47 @@ async function handleTurnStreaming(
   const session = tracked.session;
   if (!session) return;
 
-  const config: GenerateContentConfig = {
-    systemInstruction: session.systemInstruction,
-    tools: session.tools,
-  };
+  // Attempt Gemini context caching for large contexts
+  await createOrUpdateGeminiCache(session, tracked);
 
-  const stream = await ai.models.generateContentStream({
-    model: GEMINI_MODEL,
-    contents: session.history,
-    config,
-  });
+  let config: GenerateContentConfig;
+  if (session.cachedContentName) {
+    // Use cached content — do NOT pass systemInstruction/tools (they're in the cache)
+    config = { cachedContent: session.cachedContentName };
+  } else {
+    config = {
+      systemInstruction: session.systemInstruction,
+      tools: session.tools,
+    };
+  }
+
+  let stream;
+  try {
+    stream = await ai.models.generateContentStream({
+      model: GEMINI_MODEL,
+      contents: session.history,
+      config,
+    });
+  } catch (err: any) {
+    // If cache reference failed (expired/deleted), retry without cache
+    if (session.cachedContentName && /cache|not found|invalid/i.test(err.message)) {
+      console.warn('[voxglide] Cache reference failed, retrying without cache:', err.message);
+      session.cachedContentName = null;
+      session.cachedContentHash = null;
+      session.cacheEligible = false;
+      config = {
+        systemInstruction: session.systemInstruction,
+        tools: session.tools,
+      };
+      stream = await ai.models.generateContentStream({
+        model: GEMINI_MODEL,
+        contents: session.history,
+        config,
+      });
+    } else {
+      throw err;
+    }
+  }
 
   let accumulatedText = '';
   const functionCalls: any[] = [];
