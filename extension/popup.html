@@ -61,6 +61,12 @@
     #inject:hover { background: #1d4ed8; }
     #status { font-size: 11px; color: #999; text-align: center; margin-top: 6px; }
     .empty-hint { color: #bbb; font-style: italic; }
+    .footer { margin-top: 10px; text-align: center; }
+    .footer a {
+      font-size: 11px; color: #2563eb; text-decoration: none; cursor: pointer;
+    }
+    .footer a:hover { text-decoration: underline; }
+    .footer a.disabled { color: #ccc; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -97,6 +103,7 @@
 
   <button id="inject">Inject Now</button>
   <div id="status"></div>
+  <div class="footer"><a id="adminLink" class="disabled">Open Admin Panel</a></div>
 
   <script src="popup.js"></script>
 </body>

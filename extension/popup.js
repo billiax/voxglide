@@ -7,6 +7,7 @@ const autoInjectToggle = document.getElementById('autoInject');
 const previewEl = document.getElementById('preview');
 const injectBtn = document.getElementById('inject');
 const statusEl = document.getElementById('status');
+const adminLink = document.getElementById('adminLink');
 
 // --- URL helpers ---
 
@@ -59,8 +60,19 @@ function getOptions() {
 
 // --- Preview ---
 
+function updateAdminLink(parsed) {
+  if (parsed) {
+    adminLink.href = `${parsed.httpBase}/admin`;
+    adminLink.classList.remove('disabled');
+  } else {
+    adminLink.removeAttribute('href');
+    adminLink.classList.add('disabled');
+  }
+}
+
 function updatePreview() {
   const parsed = parseServerUrl(serverUrlInput.value);
+  updateAdminLink(parsed);
   if (!parsed) {
     previewEl.innerHTML = '<span class="empty-hint">Enter a server URL to see preview</span>';
     return;
@@ -111,6 +123,15 @@ for (const el of [serverUrlInput, contextArea]) {
 for (const el of [optAutoContext, optTts, optDebug, autoInjectToggle]) {
   el.addEventListener('change', () => { saveAll(); updatePreview(); });
 }
+
+// --- Admin link ---
+
+adminLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (adminLink.href) {
+    chrome.tabs.create({ url: adminLink.href });
+  }
+});
 
 // --- Inject ---
 
