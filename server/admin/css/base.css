@@ -1,0 +1,115 @@
+/* ── Theme Variables ── */
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-hover: #1c2128;
+  --bg-active: #1f2937;
+
+  --text-primary: #e6edf3;
+  --text-secondary: #c9d1d9;
+  --text-muted: #8b949e;
+  --text-faint: #484f58;
+
+  --border-primary: #30363d;
+  --border-secondary: #21262d;
+
+  --accent-blue: #58a6ff;
+  --accent-green: #3fb950;
+  --accent-purple: #d2a8ff;
+  --accent-orange: #ffa657;
+  --accent-cyan: #79c0ff;
+  --accent-red: #f85149;
+
+  /* Event backgrounds */
+  --bg-event-text: #0d1f3c;
+  --bg-event-response: #0d2818;
+  --bg-event-tool: #1a0d2e;
+  --bg-event-tool-result: #170d2e;
+  --bg-event-scan: #0d1929;
+  --bg-event-context: #2a1a0a;
+  --bg-event-session: #161b22;
+  --bg-event-error: #2d1215;
+
+  /* Badge backgrounds */
+  --bg-badge-blue: #1a3a5c;
+  --bg-badge-green: #1b4332;
+  --bg-badge-purple: #2d1b4e;
+  --bg-badge-orange: #3d2a14;
+  --bg-badge-red: #3d1f1f;
+  --bg-badge-dim: #21262d;
+
+  /* Scrollbar */
+  --scrollbar-thumb: #30363d;
+  --scrollbar-thumb-hover: #484f58;
+}
+
+[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #e1e4e8;
+  --bg-hover: #eaeef2;
+  --bg-active: #dbe1e7;
+
+  --text-primary: #1f2328;
+  --text-secondary: #3d444d;
+  --text-muted: #656d76;
+  --text-faint: #8b949e;
+
+  --border-primary: #d0d7de;
+  --border-secondary: #e1e4e8;
+
+  --accent-blue: #0969da;
+  --accent-green: #1a7f37;
+  --accent-purple: #8250df;
+  --accent-orange: #bf5700;
+  --accent-cyan: #0550ae;
+  --accent-red: #cf222e;
+
+  /* Event backgrounds */
+  --bg-event-text: #dbeafe;
+  --bg-event-response: #dcfce7;
+  --bg-event-tool: #ede9fe;
+  --bg-event-tool-result: #e8e0f8;
+  --bg-event-scan: #dbeef8;
+  --bg-event-context: #fef3c7;
+  --bg-event-session: #f6f8fa;
+  --bg-event-error: #fee2e2;
+
+  /* Badge backgrounds */
+  --bg-badge-blue: #dbeafe;
+  --bg-badge-green: #dcfce7;
+  --bg-badge-purple: #ede9fe;
+  --bg-badge-orange: #fef3c7;
+  --bg-badge-red: #fee2e2;
+  --bg-badge-dim: #e1e4e8;
+
+  /* Scrollbar */
+  --scrollbar-thumb: #d0d7de;
+  --scrollbar-thumb-hover: #afb8c1;
+}
+
+/* ── Reset ── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Layout ── */
+.layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }

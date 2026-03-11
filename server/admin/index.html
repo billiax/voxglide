@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoxGlide Admin Dashboard</title>
+<link rel="stylesheet" href="/admin/css/base.css">
+<link rel="stylesheet" href="/admin/css/components.css">
+<link rel="stylesheet" href="/admin/css/events.css">
+<link rel="stylesheet" href="/admin/css/analysis.css">
+</head>
+<body>
+
+<div class="header">
+  <h1><span>VoxGlide</span> Admin Dashboard</h1>
+  <div class="header-right">
+    <button id="themeToggle" class="theme-toggle" title="Toggle theme"></button>
+    <div class="connection-status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Connecting...</span>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-header">Sessions <span id="sessionCount">(0)</span></div>
+    <div class="session-list" id="sessionList">
+      <div class="no-sessions" id="noSessions">No active sessions</div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="main-header" id="mainHeader">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="session-info" id="selectedSessionInfo">Select a session to view events</span>
+        <div class="tab-bar" id="tabBar" style="display:none">
+          <button class="tab-btn active" data-tab="events">Events</button>
+          <button class="tab-btn" data-tab="analysis">Page Analysis</button>
+        </div>
+      </div>
+      <span id="selectedSessionMeta"></span>
+    </div>
+    <div class="event-stream" id="eventStream">
+      <div class="empty-state" id="emptyState">Select a session from the sidebar</div>
+    </div>
+    <div class="analysis-panel" id="analysisPanel">
+      <div class="analysis-empty" id="analysisEmpty">No scan data yet</div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/admin/js/app.js"></script>
+</body>
+</html>

@@ -68,6 +68,7 @@ interface TrackedSession {
   turnQueue: Array<() => Promise<void>>;
   turnProcessing: boolean;
   abortController: AbortController | null;
+  lastScanData: any | null;
 }
 
 // ── Session & Admin State ──
@@ -111,6 +112,7 @@ function getSessionSummary(tracked: TrackedSession) {
     connectedAt: tracked.connectedAt,
     messageCount: tracked.messageCount,
     disconnected: tracked.disconnected,
+    lastScanData: tracked.lastScanData,
   };
 }
 
@@ -202,10 +204,11 @@ async function maybeSummarizeHistory(session: Session, tracked: TrackedSession):
 
 // Static file serving for SDK dist
 const distDir = path.resolve(import.meta.dirname || __dirname, '..', 'dist');
-const adminHtmlPath = path.resolve(import.meta.dirname || __dirname, 'admin.html');
+const adminDir = path.resolve(import.meta.dirname || __dirname, 'admin');
 
 const MIME_TYPES: Record<string, string> = {
   '.js': 'application/javascript',
+  '.css': 'text/css',
   '.map': 'application/json',
 };
 
@@ -224,15 +227,38 @@ const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => 
     return;
   }
 
-  // Serve admin dashboard HTML at GET /admin
+  // Serve admin dashboard at /admin and /admin/*
   if (req.url === '/admin') {
     try {
-      const html = fs.readFileSync(adminHtmlPath, 'utf-8');
+      const html = fs.readFileSync(path.join(adminDir, 'index.html'), 'utf-8');
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(html);
     } catch {
       res.writeHead(500);
       res.end('Admin page not found');
+    }
+    return;
+  }
+
+  if (req.url?.startsWith('/admin/')) {
+    const relPath = req.url.slice('/admin/'.length);
+    const filePath = path.join(adminDir, relPath);
+    const ext = path.extname(filePath);
+
+    // Prevent directory traversal and check MIME type
+    if (!filePath.startsWith(adminDir) || !MIME_TYPES[ext]) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+
+    try {
+      const content = fs.readFileSync(filePath);
+      res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] });
+      res.end(content);
+    } catch {
+      res.writeHead(404);
+      res.end();
     }
     return;
   }
@@ -420,6 +446,7 @@ function handleSessionStart(clientWs: WebSocket, msg: any): void {
     turnQueue: [],
     turnProcessing: false,
     abortController: null,
+    lastScanData: null,
   };
 
   trackedSessions.set(sessionId, tracked);
@@ -518,7 +545,9 @@ function handleToolProgress(tracked: TrackedSession, msg: any): void {
 }
 
 function handleScan(tracked: TrackedSession, msg: any): void {
-  logSessionEvent(tracked, 'scan', msg.data || {});
+  const scanData = msg.data || {};
+  tracked.lastScanData = scanData;
+  logSessionEvent(tracked, 'scan', scanData);
 }
 
 function handleContextUpdate(tracked: TrackedSession, msg: any): void {

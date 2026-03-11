@@ -1,0 +1,306 @@
+/* ── Event Filter Bar ── */
+.event-filter-bar {
+  display: flex;
+  gap: 4px;
+  padding: 8px 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-secondary);
+  flex-wrap: wrap;
+}
+.filter-toggle {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.filter-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.filter-toggle.active {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--accent-blue);
+}
+.filter-toggle .filter-count {
+  font-size: 10px;
+  color: var(--text-faint);
+  font-weight: 400;
+}
+.filter-toggle.active .filter-count {
+  color: var(--text-muted);
+}
+
+/* ── Event items ── */
+.event-item {
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  border-left: 3px solid transparent;
+}
+.event-item.filtered-out { display: none; }
+
+.event-time {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: monospace;
+  margin-right: 8px;
+}
+.event-label {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 8px;
+  display: inline-block;
+}
+
+/* Event type colors */
+.event-item.text {
+  border-left-color: var(--accent-blue);
+  background: var(--bg-event-text);
+}
+.event-item.text .event-label { background: var(--bg-badge-blue); color: var(--accent-blue); }
+
+.event-item.response {
+  border-left-color: var(--accent-green);
+  background: var(--bg-event-response);
+}
+.event-item.response .event-label { background: var(--bg-badge-green); color: var(--accent-green); }
+
+.event-item.toolCall {
+  border-left-color: var(--accent-purple);
+  background: var(--bg-event-tool);
+}
+.event-item.toolCall .event-label { background: var(--bg-badge-purple); color: var(--accent-purple); }
+
+.event-item.toolResult {
+  border-left-color: var(--accent-purple);
+  background: var(--bg-event-tool-result);
+}
+.event-item.toolResult .event-label { background: var(--bg-badge-purple); color: var(--accent-purple); }
+
+.event-item.scan {
+  border-left-color: var(--accent-cyan);
+  background: var(--bg-event-scan);
+}
+.event-item.scan .event-label { background: var(--bg-badge-blue); color: var(--accent-cyan); }
+
+.event-item.context\.update {
+  border-left-color: var(--accent-orange);
+  background: var(--bg-event-context);
+}
+.event-item.context\.update .event-label { background: var(--bg-badge-orange); color: var(--accent-orange); }
+
+.event-item.session\.start, .event-item.session\.stop {
+  border-left-color: var(--text-muted);
+  background: var(--bg-event-session);
+}
+.event-item.session\.start .event-label,
+.event-item.session\.stop .event-label { background: var(--bg-badge-dim); color: var(--text-muted); }
+
+.event-item.error {
+  border-left-color: var(--accent-red);
+  background: var(--bg-event-error);
+}
+.event-item.error .event-label { background: var(--bg-badge-red); color: var(--accent-red); }
+
+.event-item.response\.delta {
+  border-left-color: var(--accent-green);
+  background: var(--bg-event-response);
+}
+.event-item.response\.delta .event-label { background: var(--bg-badge-green); color: var(--accent-green); }
+
+.event-item.history\.summarized {
+  border-left-color: var(--accent-orange);
+  background: var(--bg-event-context);
+}
+.event-item.history\.summarized .event-label { background: var(--bg-badge-orange); color: var(--accent-orange); }
+
+.event-item.tool\.progress {
+  border-left-color: var(--accent-purple);
+  background: var(--bg-event-tool);
+}
+.event-item.tool\.progress .event-label { background: var(--bg-badge-purple); color: var(--accent-purple); }
+
+.event-item.session\.resumed {
+  border-left-color: var(--accent-blue);
+  background: var(--bg-event-text);
+}
+.event-item.session\.resumed .event-label { background: var(--bg-badge-blue); color: var(--accent-blue); }
+
+.event-item.session\.disconnected {
+  border-left-color: var(--text-muted);
+  background: var(--bg-event-session);
+}
+.event-item.session\.disconnected .event-label { background: var(--bg-badge-dim); color: var(--text-muted); }
+
+.tool-progress-status {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-left: 6px;
+}
+.tool-progress-status.executing { background: var(--bg-badge-blue); color: var(--accent-blue); }
+.tool-progress-status.completed { background: var(--bg-badge-green); color: var(--accent-green); }
+.tool-progress-status.failed { background: var(--bg-badge-red); color: var(--accent-red); }
+
+.event-content {
+  margin-top: 4px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.event-content.collapsed {
+  max-height: 80px;
+  overflow: hidden;
+  position: relative;
+}
+.event-content.collapsed::after {
+  content: '... (click to expand)';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  background: inherit;
+  padding-left: 16px;
+  color: var(--accent-blue);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* Scan details */
+.scan-details {
+  margin-top: 6px;
+  font-size: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 4px;
+}
+.scan-stat {
+  background: var(--bg-tertiary);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.scan-stat strong { color: var(--text-primary); }
+
+/* Tool call formatting */
+.tool-name {
+  color: var(--accent-purple);
+  font-weight: 600;
+}
+.tool-args {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Context panel */
+.context-panel {
+  margin-top: 8px;
+}
+.context-section {
+  margin-top: 4px;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.context-section summary {
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.context-section summary:hover { background: var(--bg-hover); }
+.context-content {
+  padding: 10px 12px;
+  margin: 0;
+  font-size: 12px;
+  font-family: monospace;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* ── Event Groups ── */
+.event-group {
+  margin-bottom: 4px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-secondary);
+}
+.event-group-header {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s;
+  background: var(--bg-secondary);
+}
+.event-group-header:hover { background: var(--bg-hover); }
+.event-group-header .chevron {
+  transition: transform 0.15s;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.event-group.collapsed .event-group-header .chevron {
+  transform: rotate(-90deg);
+}
+.event-group-header .group-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.event-group-header .group-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.group-badge.completed { background: var(--bg-badge-green); color: var(--accent-green); }
+.group-badge.failed { background: var(--bg-badge-red); color: var(--accent-red); }
+.group-badge.navigated { background: var(--bg-badge-blue); color: var(--accent-blue); }
+.event-group-body {
+  border-top: 1px solid var(--border-secondary);
+}
+.event-group.collapsed .event-group-body { display: none; }
+.event-group-body .event-item {
+  border-radius: 0;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--border-secondary);
+}
+.event-group-body .event-item:last-child { border-bottom: none; }
+
+/* Duplicate scan indicator */
+.duplicate-indicator {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-badge-dim);
+  color: var(--text-muted);
+  margin-left: 6px;
+}

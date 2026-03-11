@@ -159,6 +159,8 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
             }
             // Clear pending reconnect now that we've successfully connected
             NavigationHandler.consumePendingReconnect();
+            // Send structured scan data to server for admin visualization
+            this.sendScanDataToServer();
           } else if (status === 'disconnected') {
             // Ignore stale disconnect if already disconnected (e.g. from old WS onclose)
             if (this.connectionState === ConnectionState.DISCONNECTED) return;
@@ -358,10 +360,23 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         .replace('{toolDescriptions}', toolDescriptions || 'None.');
 
       this.session.sendContextUpdate(systemInstruction);
+      // Send structured scan data for admin visualization
+      this.sendScanDataToServer();
     } catch (error: any) {
       if (this.config.debug) {
         console.log('[VoiceSDK:context] Failed to send context update:', error.message);
       }
+    }
+  }
+
+  /**
+   * Send structured scan data to the server for admin dashboard visualization.
+   */
+  private sendScanDataToServer(): void {
+    if (!this.session || !this.pageContextProvider) return;
+    const scanData = this.pageContextProvider.getLastScanData();
+    if (scanData) {
+      this.session.sendScanResults(scanData);
     }
   }
 

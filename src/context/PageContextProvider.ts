@@ -329,6 +329,13 @@ export class PageContextProvider implements ContextProvider {
     return allocated.map((s) => s.content).join('\n\n');
   }
 
+  /**
+   * Returns the raw structured scan data from the last scan, or null if no scan has been performed.
+   */
+  getLastScanData(): PageContext | null {
+    return this.cachedContext;
+  }
+
   destroy(): void {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
