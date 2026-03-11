@@ -90,17 +90,14 @@ tests/
 ## Build & Development
 
 ### Running the Dev Environment
-The user runs the app themselves outside of Claude Code using `start-dev-hot-reload.sh`. **Do not start or restart the dev server** — it is always running in a separate terminal.
+The user runs the app themselves outside of Claude Code using `start-dev.sh`. **Do not start or restart the dev server** — it is always running in a separate terminal.
 
-The hot-reload script (`./start-dev-hot-reload.sh`) does the following:
-1. Loads `GEMINI_API_KEY` from `.env` (or environment)
-2. Builds the SDK (`npm run build`)
-3. Starts the server (`cd server && npx tsx index.ts`) on port 3100
-4. Starts the Cloudflare tunnel (`voxglide.nextbt.ai`) if not already running
-5. Watches `src/` and `server/` using `inotifywait` for file changes
-6. On change: waits 3s cooldown for changes to settle, rebuilds SDK, restarts server
+The dev script (`./start-dev.sh`) runs two independent watchers:
+1. **SDK watcher** (`rollup --watch`) — rebuilds `dist/` when `src/` changes. The server serves SDK files from disk on each request, so no server restart needed.
+2. **Server watcher** (`tsx watch`) — restarts only the server when `server/` files change.
+3. Starts the Cloudflare tunnel (`voxglide.nextbt.ai`) if configured.
 
-This means any file changes you make to `src/` or `server/` will automatically trigger a rebuild and server restart. No manual intervention needed.
+This means `src/` changes only trigger a fast SDK rebuild (no server restart), and `server/` changes only restart the server (no SDK rebuild).
 
 ### Client SDK
 ```bash
