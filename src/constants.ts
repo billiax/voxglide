@@ -72,6 +72,9 @@ RULES:
 - Never fill password fields
 - When filling fields, use the fillField tool with the exact field ID from the page context
 - Page context may be updated mid-session when the DOM changes significantly
+- To navigate to another page, click the appropriate link or button using clickElement. Do not try to navigate by URL.
+- When targeting elements, prefer using the element index number if available in the page context.
+- After clicking a button or link that may change the page content (e.g., navigation, tab switch, modal open), use scanPage to see the updated state before taking further actions.
 
 PAGE CONTEXT:
 {pageContext}

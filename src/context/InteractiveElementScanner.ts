@@ -1,5 +1,6 @@
 import type { InteractiveElement, ElementCapability } from '../types';
 import { INTERACTIVE_SELECTOR } from '../constants';
+import { getNearbyLabelText } from '../actions/dom-utils';
 
 /**
  * Deeply scans the DOM for all interactive elements and categorizes
@@ -11,6 +12,8 @@ export class InteractiveElementScanner {
   private wasTruncated = false;
   private totalFound = 0;
   private includedCount = 0;
+  private indexMap = new Map<number, HTMLElement>();
+  private nextIndex = 1;
 
   constructor(maxElements = 100) {
     this.maxElements = maxElements;
@@ -23,6 +26,10 @@ export class InteractiveElementScanner {
     const rawElements = document.querySelectorAll(INTERACTIVE_SELECTOR);
     const results: InteractiveElement[] = [];
     let visibleCount = 0;
+
+    // Clear index map and reset counter for each scan
+    this.indexMap.clear();
+    this.nextIndex = 1;
 
     for (const el of rawElements) {
       const htmlEl = el as HTMLElement;
@@ -47,12 +54,17 @@ export class InteractiveElementScanner {
 
       if (results.length >= this.maxElements) continue;
 
+      // Assign index before viewport sort so indices are stable per scan
+      const index = this.nextIndex++;
+      this.indexMap.set(index, htmlEl);
+
       const selector = this.generateSelector(htmlEl);
       const role = htmlEl.getAttribute('role') || undefined;
       const state = this.captureState(htmlEl);
       const inViewport = this.isInViewport(htmlEl);
 
       results.push({
+        index,
         description,
         selector,
         tagName: htmlEl.tagName.toLowerCase(),
@@ -76,6 +88,24 @@ export class InteractiveElementScanner {
     });
 
     return results;
+  }
+
+  /**
+   * Resolve an element by its scan index. Returns null if the element
+   * is no longer connected to the DOM.
+   */
+  getElementByIndex(index: number): HTMLElement | null {
+    const el = this.indexMap.get(index);
+    if (el?.isConnected) return el;
+    this.indexMap.delete(index);
+    return null;
+  }
+
+  /**
+   * Returns the full index map for bulk access.
+   */
+  getIndexMap(): Map<number, HTMLElement> {
+    return this.indexMap;
   }
 
   /**
@@ -229,49 +259,8 @@ export class InteractiveElementScanner {
 
     // For label-less controls (switches, checkboxes), look at nearby sibling/parent text
     if (role === 'switch' || role === 'checkbox' || role === 'radio' || role === 'slider') {
-      const nearby = this.findNearbyLabelText(el);
+      const nearby = getNearbyLabelText(el);
       if (nearby) return this.truncate(nearby, 60);
-    }
-
-    return '';
-  }
-
-  /**
-   * For controls without their own text (role=switch, checkbox, etc.),
-   * look at sibling elements (preceding and following) and parent containers for label text.
-   */
-  private findNearbyLabelText(el: HTMLElement): string {
-    // Check preceding siblings for text
-    let sibling: Element | null = el.previousElementSibling;
-    while (sibling) {
-      const text = sibling.textContent?.trim();
-      if (text && text.length < 80) return text;
-      sibling = sibling.previousElementSibling;
-    }
-
-    // Check following siblings for text
-    sibling = el.nextElementSibling;
-    while (sibling) {
-      const text = sibling.textContent?.trim();
-      if (text && text.length < 80) return text;
-      sibling = sibling.nextElementSibling;
-    }
-
-    // Walk up to find a container with text that isn't just the element itself
-    let parent = el.parentElement;
-    for (let depth = 0; parent && depth < 3; depth++) {
-      // Look at siblings of the parent (both directions)
-      const prevSibling = parent.previousElementSibling;
-      if (prevSibling) {
-        const text = prevSibling.textContent?.trim();
-        if (text && text.length < 80) return text;
-      }
-      const nextSibling = parent.nextElementSibling;
-      if (nextSibling) {
-        const text = nextSibling.textContent?.trim();
-        if (text && text.length < 80) return text;
-      }
-      parent = parent.parentElement;
     }
 
     return '';

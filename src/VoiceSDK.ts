@@ -5,7 +5,7 @@ import { TextProvider } from './context/TextProvider';
 import { PageContextProvider } from './context/PageContextProvider';
 import { ActionRouter } from './actions/ActionRouter';
 import { NavigationHandler } from './actions/NavigationHandler';
-import { invalidateElementCache } from './actions/DOMActions';
+import { invalidateElementCache, setIndexResolver, setRescanCallback } from './actions/DOMActions';
 import { builtInTools } from './actions/tools';
 import { UIManager } from './ui/UIManager';
 import { ConnectionState, DEFAULT_LANGUAGE, SYSTEM_PROMPT_TEMPLATE } from './constants';
@@ -29,6 +29,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   private ttsEnabled: boolean;
   private resolvedInputMode: InputMode;
   private toggling = false;
+  private lastScreenshotUrl: string | null = null;
 
   constructor(config: VoiceSDKConfig) {
     super();
@@ -58,6 +59,16 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     // Register scanPage handler
     this.actionRouter.registerHandler('scanPage', async () => {
       return this.handleScanPage();
+    });
+
+    // Wire index resolver and rescan callback for self-healing
+    this.wireIndexResolver();
+    setRescanCallback(async () => {
+      if (this.pageContextProvider) {
+        this.pageContextProvider.markDirty();
+        await this.contextEngine.buildSystemPrompt();
+        this.wireIndexResolver();
+      }
     });
 
     // Register custom actions
@@ -350,6 +361,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
 
     try {
       const contextPrompt = await this.contextEngine.buildSystemPrompt();
+      this.wireIndexResolver();
       const contextTools = await this.contextEngine.getTools();
       const allTools = this.buildToolDeclarations(contextTools);
       const toolDescriptions = allTools.map((t) => `- ${t.name}: ${t.description}`).join('\n');
@@ -371,12 +383,21 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
 
   /**
    * Send structured scan data to the server for admin dashboard visualization.
+   * Also triggers an automatic screenshot capture when the page URL changes.
    */
   private sendScanDataToServer(): void {
     if (!this.session || !this.pageContextProvider) return;
     const scanData = this.pageContextProvider.getLastScanData();
     if (scanData) {
       this.session.sendScanResults(scanData);
+
+      // Auto-capture screenshot on URL change (non-blocking)
+      const currentUrl = scanData.url || '';
+      if (currentUrl !== this.lastScreenshotUrl) {
+        this.lastScreenshotUrl = currentUrl;
+        // Small delay to let the page render after navigation
+        setTimeout(() => this.session?.captureAndSendScreenshot(), 500);
+      }
     }
   }
 
@@ -397,9 +418,20 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
 
     try {
       const contextPrompt = await this.contextEngine.buildSystemPrompt();
+      this.wireIndexResolver();
       return { result: JSON.stringify({ success: true, context: contextPrompt }) };
     } catch (error: any) {
       return { result: JSON.stringify({ error: error.message }) };
+    }
+  }
+
+  /**
+   * Wire the index resolver from the scanner's getElementByIndex to DOMActions.
+   */
+  private wireIndexResolver(): void {
+    if (this.pageContextProvider) {
+      const scanner = this.pageContextProvider.getScanner();
+      setIndexResolver((index: number) => scanner.getElementByIndex(index));
     }
   }
 
@@ -409,6 +441,8 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   async destroy(): Promise<void> {
     this.cancelTTS();
     await this.stop();
+    setIndexResolver(null);
+    setRescanCallback(null);
     this.ui?.clearTranscript();
     this.pageContextProvider?.destroy();
     this.ui?.destroy();

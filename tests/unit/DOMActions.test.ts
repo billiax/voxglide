@@ -1,9 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fillField, clickElement, readContent } from '../../src/actions/DOMActions';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { fillField, clickElement, readContent, invalidateElementCache, setIndexResolver, setRescanCallback } from '../../src/actions/DOMActions';
 
 describe('DOMActions', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+    invalidateElementCache();
+    setIndexResolver(null);
+    setRescanCallback(null);
+  });
+
+  afterEach(() => {
+    setIndexResolver(null);
+    setRescanCallback(null);
   });
 
   // ── fillField ──
@@ -65,10 +73,10 @@ describe('DOMActions', () => {
       expect((document.getElementById('addr') as HTMLInputElement).value).toBe('123 Main St');
     });
 
-    it('returns error if no fieldId provided', async () => {
+    it('returns error if no fieldId or index provided', async () => {
       const result = await fillField({ fieldId: '', value: 'x' });
       const parsed = JSON.parse(result.result);
-      expect(parsed.error).toBe('No fieldId provided');
+      expect(parsed.error).toBe('No fieldId or index provided');
     });
 
     it('returns error if field not found', async () => {
@@ -221,10 +229,10 @@ describe('DOMActions', () => {
       expect(parsed.error).toContain('Could not find element');
     });
 
-    it('returns error if no description or selector provided', async () => {
+    it('returns error if no description, selector, or index provided', async () => {
       const result = await clickElement({});
       const parsed = JSON.parse(result.result);
-      expect(parsed.error).toBe('No description or selector provided');
+      expect(parsed.error).toBe('No description, selector, or index provided');
     });
   });
 
@@ -258,6 +266,155 @@ describe('DOMActions', () => {
       const result = await readContent({});
       const parsed = JSON.parse(result.result);
       expect(parsed.content).toHaveLength(2000);
+    });
+  });
+
+  // ── Click event sequence ──
+
+  describe('click event sequence', () => {
+    it('fires full pointer/mouse event sequence with bubbles: true', async () => {
+      document.body.innerHTML = '<button>Test</button>';
+      const btn = document.querySelector('button')!;
+      const events: string[] = [];
+
+      btn.addEventListener('focus', () => events.push('focus'));
+      btn.addEventListener('pointerdown', (e) => { events.push('pointerdown'); expect(e.bubbles).toBe(true); });
+      btn.addEventListener('mousedown', (e) => { events.push('mousedown'); expect(e.bubbles).toBe(true); });
+      btn.addEventListener('pointerup', (e) => { events.push('pointerup'); expect(e.bubbles).toBe(true); });
+      btn.addEventListener('mouseup', (e) => { events.push('mouseup'); expect(e.bubbles).toBe(true); });
+      btn.addEventListener('click', () => events.push('click'));
+
+      await clickElement({ description: 'Test' });
+
+      expect(events).toEqual(['focus', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']);
+    });
+  });
+
+  // ── Fill event ordering ──
+
+  describe('fillField event ordering', () => {
+    it('fires focus exactly once, in correct order: focus -> input -> change -> blur', async () => {
+      document.body.innerHTML = '<input id="field" type="text" />';
+      const el = document.getElementById('field') as HTMLInputElement;
+      const events: string[] = [];
+
+      el.addEventListener('focus', () => events.push('focus'));
+      el.addEventListener('input', () => events.push('input'));
+      el.addEventListener('change', () => events.push('change'));
+      el.addEventListener('blur', () => events.push('blur'));
+
+      await fillField({ fieldId: 'field', value: 'test' });
+
+      // Focus should only fire once (no duplicate from setFieldValue)
+      const focusCount = events.filter(e => e === 'focus').length;
+      expect(focusCount).toBe(1);
+
+      expect(events).toEqual(['focus', 'input', 'change', 'blur']);
+    });
+  });
+
+  // ── Index-based resolution ──
+
+  describe('index-based resolution', () => {
+    it('clicks element by index when resolver is set', async () => {
+      document.body.innerHTML = '<button id="target">Click Me</button>';
+      const btn = document.getElementById('target') as HTMLElement;
+      const handler = vi.fn();
+      btn.addEventListener('click', handler);
+
+      setIndexResolver((index) => index === 5 ? btn : null);
+
+      const result = await clickElement({ index: 5 });
+      const parsed = JSON.parse(result.result);
+      expect(parsed.success).toBe(true);
+      expect(handler).toHaveBeenCalled();
+    });
+
+    it('falls through to description when index does not resolve', async () => {
+      document.body.innerHTML = '<button>Fallback</button>';
+      const handler = vi.fn();
+      document.querySelector('button')!.addEventListener('click', handler);
+
+      setIndexResolver(() => null);
+
+      const result = await clickElement({ index: 99, description: 'Fallback' });
+      const parsed = JSON.parse(result.result);
+      expect(parsed.success).toBe(true);
+      expect(handler).toHaveBeenCalled();
+    });
+
+    it('fills field by index when resolver is set', async () => {
+      document.body.innerHTML = '<input id="field" type="text" />';
+      const input = document.getElementById('field') as HTMLInputElement;
+
+      setIndexResolver((index) => index === 3 ? input : null);
+
+      const result = await fillField({ index: 3, value: 'indexed' });
+      const parsed = JSON.parse(result.result);
+      expect(parsed.success).toBe(true);
+      expect(input.value).toBe('indexed');
+    });
+  });
+
+  // ── Scored matching ──
+
+  describe('scored click matching', () => {
+    it('prefers exact match over partial', async () => {
+      document.body.innerHTML = `
+        <button>Dashboard Settings</button>
+        <button>Dashboard</button>
+      `;
+      const buttons = document.querySelectorAll('button');
+      const exactHandler = vi.fn();
+      const partialHandler = vi.fn();
+      buttons[0].addEventListener('click', partialHandler);
+      buttons[1].addEventListener('click', exactHandler);
+
+      await clickElement({ description: 'Dashboard' });
+
+      expect(exactHandler).toHaveBeenCalled();
+      expect(partialHandler).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Self-healing retry ──
+
+  describe('self-healing retry', () => {
+    it('retries after re-scan callback adds element', async () => {
+      document.body.innerHTML = '';
+      let scanCalled = false;
+
+      setRescanCallback(async () => {
+        scanCalled = true;
+        // Simulate a re-scan adding an element
+        document.body.innerHTML = '<button>Late Button</button>';
+      });
+
+      const result = await clickElement({ description: 'Late Button' });
+      const parsed = JSON.parse(result.result);
+
+      expect(scanCalled).toBe(true);
+      expect(parsed.success).toBe(true);
+    });
+
+    it('returns error after retry failure', async () => {
+      document.body.innerHTML = '';
+
+      setRescanCallback(async () => {
+        // Re-scan still doesn't find the element
+      });
+
+      const result = await clickElement({ description: 'Impossible Element' });
+      const parsed = JSON.parse(result.result);
+      expect(parsed.error).toContain('Could not find element');
+    });
+
+    it('skips retry when no callback set', async () => {
+      document.body.innerHTML = '';
+      // No rescan callback set
+      const result = await clickElement({ description: 'Missing' });
+      const parsed = JSON.parse(result.result);
+      expect(parsed.error).toContain('Could not find element');
     });
   });
 });

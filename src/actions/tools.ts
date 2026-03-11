@@ -6,10 +6,14 @@ import type { ToolDeclaration } from '../types';
 
 export const fillFieldTool: ToolDeclaration = {
   name: 'fillField',
-  description: 'Fill a form field with a value. Resolves the field by ID, name, label text, placeholder, or aria-label.',
+  description: 'Fill a form field with a value. Resolves the field by index, ID, name, label text, placeholder, or aria-label.',
   parameters: {
     type: 'OBJECT',
     properties: {
+      index: {
+        type: 'INTEGER',
+        description: 'The element index number from the page context. Preferred over fieldId when available.',
+      },
       fieldId: {
         type: 'STRING',
         description: 'The ID, name, label, or placeholder of the field to fill.',
@@ -19,16 +23,20 @@ export const fillFieldTool: ToolDeclaration = {
         description: 'The value to set in the field. For checkboxes use "true"/"false". For selects, use the option text.',
       },
     },
-    required: ['fieldId', 'value'],
+    required: ['value'],
   },
 };
 
 export const clickElementTool: ToolDeclaration = {
   name: 'clickElement',
-  description: 'Click an element on the page. Finds it by text content, aria-label, title, or CSS selector.',
+  description: 'Click an element on the page. Finds it by index number, text content, aria-label, title, or CSS selector.',
   parameters: {
     type: 'OBJECT',
     properties: {
+      index: {
+        type: 'INTEGER',
+        description: 'The element index number from the page context. Preferred over description when available.',
+      },
       description: {
         type: 'STRING',
         description: 'Description of the element to click (button text, link text, etc.).',
@@ -38,22 +46,7 @@ export const clickElementTool: ToolDeclaration = {
         description: 'Optional CSS selector for precise targeting.',
       },
     },
-    required: ['description'],
-  },
-};
-
-export const navigateToTool: ToolDeclaration = {
-  name: 'navigateTo',
-  description: 'Navigate to a URL. For same-origin links only unless configured otherwise.',
-  parameters: {
-    type: 'OBJECT',
-    properties: {
-      url: {
-        type: 'STRING',
-        description: 'The URL to navigate to. Can be absolute or relative.',
-      },
-    },
-    required: ['url'],
+    required: [],
   },
 };
 
@@ -85,7 +78,6 @@ export const scanPageTool: ToolDeclaration = {
 export const builtInTools: ToolDeclaration[] = [
   fillFieldTool,
   clickElementTool,
-  navigateToTool,
   readContentTool,
   scanPageTool,
 ];

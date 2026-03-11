@@ -47,6 +47,25 @@ export class PageContextProvider implements ContextProvider {
     this.dirty = true;
   }
 
+  /**
+   * Returns the underlying InteractiveElementScanner for index map access.
+   */
+  getScanner(): InteractiveElementScanner {
+    return this.interactiveScanner;
+  }
+
+  private static readonly OBSERVED_ATTRIBUTES = [
+    'value', 'disabled', 'href',
+    'aria-expanded', 'aria-checked', 'aria-selected', 'aria-hidden',
+    'class', 'open',
+  ];
+
+  private static readonly MEANINGFUL_ATTRIBUTES = new Set([
+    'value', 'disabled',
+    'aria-expanded', 'aria-checked', 'aria-selected', 'aria-hidden',
+    'class', 'open',
+  ]);
+
   private startObserving(): void {
     if (typeof MutationObserver === 'undefined') return;
 
@@ -54,7 +73,7 @@ export class PageContextProvider implements ContextProvider {
       // Only mark dirty for meaningful changes (not attribute-only on our own UI)
       const meaningful = mutations.some((m) =>
         m.type === 'childList' ||
-        (m.type === 'attributes' && (m.attributeName === 'value' || m.attributeName === 'disabled'))
+        (m.type === 'attributes' && m.attributeName !== null && PageContextProvider.MEANINGFUL_ATTRIBUTES.has(m.attributeName))
       );
       if (meaningful) {
         this.dirty = true;
@@ -66,7 +85,7 @@ export class PageContextProvider implements ContextProvider {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['value', 'disabled', 'href'],
+      attributeFilter: PageContextProvider.OBSERVED_ATTRIBUTES,
     });
   }
 
@@ -291,7 +310,7 @@ export class PageContextProvider implements ContextProvider {
           ? ' (' + Object.entries(el.state).map(([k, v]) => `${k}=${v}`).join(', ') + ')'
           : '';
         const tag = el.role || el.tagName;
-        elLines.push(`  - [${tag}] "${el.description}" \u2014 ${caps}${stateStr}`);
+        elLines.push(`  - [${el.index}] [${tag}] "${el.description}" \u2014 ${caps}${stateStr}`);
       });
       // Add truncation notice if scanner had to limit results
       const truncInfo = this.interactiveScanner.getTruncationInfo();

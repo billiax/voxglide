@@ -56,6 +56,7 @@ vi.mock('../../src/context/PageContextProvider', () => {
     getContext = vi.fn().mockResolvedValue({ content: '', tools: [] });
     destroy = vi.fn();
     markDirty = vi.fn();
+    getScanner = vi.fn().mockReturnValue({ getElementByIndex: vi.fn().mockReturnValue(null) });
   }
   return { PageContextProvider: MockPageContextProvider };
 });
@@ -76,6 +77,8 @@ vi.mock('../../src/actions/DOMActions', () => ({
   clickElement: vi.fn().mockResolvedValue({ result: 'ok' }),
   readContent: vi.fn().mockResolvedValue({ result: 'ok' }),
   invalidateElementCache: vi.fn(),
+  setIndexResolver: vi.fn(),
+  setRescanCallback: vi.fn(),
 }));
 
 const baseConfig = { serverUrl: 'ws://localhost:3100' } as const;

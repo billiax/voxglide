@@ -52,6 +52,8 @@ vi.mock('../../src/context/PageContextProvider', () => {
     name = 'Page Context';
     getContext = vi.fn().mockResolvedValue({ content: '', tools: [] });
     destroy = vi.fn();
+    markDirty = vi.fn();
+    getScanner = vi.fn().mockReturnValue({ getElementByIndex: vi.fn().mockReturnValue(null) });
   }
   return { PageContextProvider: MockPageContextProvider };
 });
@@ -71,6 +73,8 @@ vi.mock('../../src/actions/DOMActions', () => ({
   clickElement: vi.fn().mockResolvedValue({ result: 'ok' }),
   readContent: vi.fn().mockResolvedValue({ result: 'ok' }),
   invalidateElementCache: vi.fn(),
+  setIndexResolver: vi.fn(),
+  setRescanCallback: vi.fn(),
 }));
 
 import { ContextEngine } from '../../src/context/ContextEngine';
