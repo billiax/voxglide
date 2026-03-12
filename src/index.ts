@@ -8,6 +8,12 @@ export type {
   ActionConfig,
   CustomAction,
   UIConfig,
+  ThemeColors,
+  ThemePreset,
+  ThemeSize,
+  ThemeColorScheme,
+  ThemeConfig,
+  ResolvedTheme,
   ToolDeclaration,
   ToolParameter,
   ContextProvider,
@@ -25,6 +31,10 @@ export type {
   ElementCapability,
   NbtFunctionDef,
   NbtParameterDef,
+  WorkflowStep,
+  WorkflowDefinition,
+  WorkflowState,
+  AccessibilityConfig,
 } from './types';
 
 // Sub-components (for advanced usage)
@@ -38,6 +48,11 @@ export { ActionRouter } from './actions/ActionRouter';
 export { NbtFunctionsProvider } from './actions/NbtFunctionsProvider';
 export { NavigationObserver } from './NavigationObserver';
 export type { NavigationEvent, NavigationCallback, BeforeUnloadCallback } from './NavigationObserver';
+export { AccessibilityManager } from './accessibility/AccessibilityManager';
+export { WorkflowEngine } from './workflows/WorkflowEngine';
+export { WorkflowContextProvider } from './workflows/WorkflowContextProvider';
+export { resolveTheme } from './ui/themes';
+export { buildStyles } from './ui/styles';
 export { EventEmitter } from './events';
 export { ConnectionState } from './constants';
 export { UIStateMachine } from './ui/UIStateMachine';

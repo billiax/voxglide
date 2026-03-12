@@ -10,6 +10,10 @@ import { NbtFunctionsProvider } from './actions/NbtFunctionsProvider';
 import { invalidateElementCache, setIndexResolver, setRescanCallback, setPostClickCallback } from './actions/DOMActions';
 import { builtInTools } from './actions/tools';
 import { UIManager } from './ui/UIManager';
+import { WorkflowEngine } from './workflows/WorkflowEngine';
+import { WorkflowContextProvider } from './workflows/WorkflowContextProvider';
+import { AccessibilityManager } from './accessibility/AccessibilityManager';
+import { a11yTools } from './accessibility/a11y-tools';
 import { ConnectionState, DEFAULT_LANGUAGE, SYSTEM_PROMPT_TEMPLATE } from './constants';
 import type { ConnectionStateValue } from './constants';
 import type {
@@ -37,6 +41,8 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   private lastScreenshotUrl: string | null = null;
   private navigationObserver: NavigationObserver | null = null;
   private nbtFunctionsProvider: NbtFunctionsProvider | null = null;
+  private workflowEngine: WorkflowEngine | null = null;
+  private a11yManager: AccessibilityManager | null = null;
   private contextChangeTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSentSystemInstruction: string | null = null;
   private lastSentScanFingerprint: string | null = null;
@@ -111,6 +117,48 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
       }
     }
 
+    // Set up workflows
+    if (config.workflows && config.workflows.length > 0) {
+      this.workflowEngine = new WorkflowEngine(config.workflows, (event, data) => {
+        if (event === 'cancel') {
+          this.emit('workflow:cancel', data as { name: string; reason: string });
+        } else {
+          this.emit(`workflow:${event}` as any, data);
+        }
+      });
+
+      // Register workflow tool handlers
+      this.actionRouter.registerHandler('startWorkflow', async (args) => {
+        const result = this.workflowEngine!.startWorkflow(args.name as string);
+        return { result: JSON.stringify(result) };
+      });
+      this.actionRouter.registerHandler('workflowStepComplete', async (args) => {
+        const result = this.workflowEngine!.advanceStep(
+          args.field as string | undefined,
+          args.value as string | undefined,
+        );
+        return { result: JSON.stringify(result) };
+      });
+      this.actionRouter.registerHandler('cancelWorkflow', async (args) => {
+        this.workflowEngine!.cancelWorkflow((args.reason as string) ?? 'Cancelled by AI');
+        return { result: JSON.stringify({ success: true }) };
+      });
+      this.actionRouter.registerHandler('getWorkflowStatus', async () => {
+        return { result: JSON.stringify(this.workflowEngine!.getState()) };
+      });
+
+      // Add context provider
+      const workflowProvider = new WorkflowContextProvider(this.workflowEngine);
+      this.contextEngine.addProvider(workflowProvider);
+    }
+
+    // Set up accessibility mode
+    if (config.accessibility) {
+      const a11yConfig = config.accessibility === true ? {} : config.accessibility;
+      this.a11yManager = new AccessibilityManager(a11yConfig, () => this.toggle());
+      this.registerA11yToolHandlers();
+    }
+
     // Set up UI (unless disabled)
     if (config.ui !== false) {
       this.ui = new UIManager(
@@ -119,6 +167,10 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         (text) => this.sendText(text),
         this.resolvedInputMode,
       );
+      // Wire accessibility to Shadow DOM host if enabled
+      if (this.a11yManager) {
+        this.a11yManager.setShadowHost(this.ui.getHost());
+      }
     }
 
     // Wire disconnect handler from panel header
@@ -262,6 +314,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
 
           actionEvent.result = result;
           this.emit('action', actionEvent);
+
+          // Accessibility: announce action result
+          this.a11yManager?.announceAction(fc.name, fc.args);
 
           return result;
         },
@@ -647,6 +702,102 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   }
 
   /**
+   * Register accessibility tool handlers on the ActionRouter.
+   */
+  private registerA11yToolHandlers(): void {
+    this.actionRouter.registerHandler('describePage', async () => {
+      const landmarks = Array.from(document.querySelectorAll('[role="banner"], [role="navigation"], [role="main"], [role="complementary"], [role="contentinfo"], nav, main, header, footer, aside'));
+      const landmarkInfo = landmarks.map(el => `${el.tagName.toLowerCase()}[role="${el.getAttribute('role') ?? el.tagName.toLowerCase()}"]`);
+      const forms = document.querySelectorAll('form').length;
+      const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6').length;
+      const links = document.querySelectorAll('a').length;
+      const buttons = document.querySelectorAll('button, [role="button"]').length;
+      const inputs = document.querySelectorAll('input, select, textarea').length;
+
+      const description = [
+        `Page: ${document.title}`,
+        `Landmarks: ${landmarkInfo.length > 0 ? landmarkInfo.join(', ') : 'none'}`,
+        `Forms: ${forms}, Headings: ${headings}, Links: ${links}, Buttons: ${buttons}, Inputs: ${inputs}`,
+      ].join('\n');
+
+      this.a11yManager?.announce('Page described');
+      return { result: JSON.stringify({ success: true, description }) };
+    });
+
+    this.actionRouter.registerHandler('focusElement', async (args) => {
+      let el: HTMLElement | null = null;
+
+      if (args.index !== undefined) {
+        const scanner = this.pageContextProvider?.getScanner();
+        el = scanner?.getElementByIndex(args.index as number) ?? null;
+      } else if (args.selector) {
+        el = document.querySelector(args.selector as string);
+      } else if (args.description) {
+        const desc = (args.description as string).toLowerCase();
+        const all = document.querySelectorAll('a, button, input, select, textarea, [role="button"], [tabindex]');
+        for (const candidate of all) {
+          if ((candidate.textContent?.toLowerCase() ?? '').includes(desc) ||
+              (candidate.getAttribute('aria-label')?.toLowerCase() ?? '').includes(desc)) {
+            el = candidate as HTMLElement;
+            break;
+          }
+        }
+      }
+
+      if (el) {
+        this.a11yManager?.focusElement(el);
+        this.a11yManager?.announce(`Focused: ${el.textContent?.trim().slice(0, 50) || el.tagName}`);
+        return { result: JSON.stringify({ success: true }) };
+      }
+      return { result: JSON.stringify({ error: 'Element not found' }) };
+    });
+
+    this.actionRouter.registerHandler('listLandmarks', async () => {
+      const selectors = '[role="banner"], [role="navigation"], [role="main"], [role="complementary"], [role="contentinfo"], nav, main, header, footer, aside';
+      const landmarks = Array.from(document.querySelectorAll(selectors)).map(el => ({
+        role: el.getAttribute('role') || el.tagName.toLowerCase(),
+        name: el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || '',
+        tag: el.tagName.toLowerCase(),
+        contentPreview: (el.textContent ?? '').trim().slice(0, 100),
+      }));
+      return { result: JSON.stringify({ success: true, landmarks }) };
+    });
+
+    this.actionRouter.registerHandler('readHeadings', async () => {
+      const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6')).map(el => ({
+        level: parseInt(el.tagName[1]),
+        text: el.textContent?.trim() ?? '',
+      }));
+      const tree = headings.map(h => `${'  '.repeat(h.level - 1)}h${h.level}: ${h.text}`).join('\n');
+      return { result: JSON.stringify({ success: true, headings: tree }) };
+    });
+
+    this.actionRouter.registerHandler('nextFormField', async () => {
+      const fields = Array.from(document.querySelectorAll<HTMLElement>('input:not([type="hidden"]), select, textarea'));
+      if (fields.length === 0) return { result: JSON.stringify({ error: 'No form fields found' }) };
+      const cursor = (this.a11yManager?.getFormCursor() ?? -1) + 1;
+      const idx = cursor >= fields.length ? 0 : cursor;
+      this.a11yManager?.setFormCursor(idx);
+      this.a11yManager?.focusElement(fields[idx]);
+      const label = fields[idx].getAttribute('aria-label') || fields[idx].getAttribute('name') || fields[idx].tagName;
+      this.a11yManager?.announce(`Field: ${label}`);
+      return { result: JSON.stringify({ success: true, fieldIndex: idx, label }) };
+    });
+
+    this.actionRouter.registerHandler('prevFormField', async () => {
+      const fields = Array.from(document.querySelectorAll<HTMLElement>('input:not([type="hidden"]), select, textarea'));
+      if (fields.length === 0) return { result: JSON.stringify({ error: 'No form fields found' }) };
+      const cursor = (this.a11yManager?.getFormCursor() ?? 1) - 1;
+      const idx = cursor < 0 ? fields.length - 1 : cursor;
+      this.a11yManager?.setFormCursor(idx);
+      this.a11yManager?.focusElement(fields[idx]);
+      const label = fields[idx].getAttribute('aria-label') || fields[idx].getAttribute('name') || fields[idx].tagName;
+      this.a11yManager?.announce(`Field: ${label}`);
+      return { result: JSON.stringify({ success: true, fieldIndex: idx, label }) };
+    });
+  }
+
+  /**
    * Destroy the SDK instance and clean up all resources.
    * Safe to call multiple times (idempotent).
    */
@@ -670,6 +821,8 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     setPostClickCallback(null);
     this.nbtFunctionsProvider?.destroy();
     this.nbtFunctionsProvider = null;
+    this.a11yManager?.destroy();
+    this.a11yManager = null;
     this.navigationObserver?.destroy();
     this.navigationObserver = null;
     this.ui?.clearTranscript();
@@ -698,6 +851,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = this.config.language || DEFAULT_LANGUAGE;
+    if (this.a11yManager) {
+      utterance.rate = this.a11yManager.getTtsRate();
+    }
 
     utterance.onend = () => {
       this.session?.resumeSpeech();
@@ -739,6 +895,11 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     // Add nbt_functions tool declarations
     if (this.nbtFunctionsProvider) {
       tools.push(...this.nbtFunctionsProvider.getToolDeclarations());
+    }
+
+    // Add accessibility tool declarations
+    if (this.a11yManager) {
+      tools.push(...a11yTools);
     }
 
     return tools;

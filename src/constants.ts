@@ -53,6 +53,7 @@ export const DEFAULT_UI: Required<UIConfig> = {
   primaryColor: '#2563eb',
   showTranscript: true,
   transcriptAutoHideMs: 5000,
+  theme: {},
 };
 
 export const SESSION_STORAGE_KEY = 'voice-sdk-session';

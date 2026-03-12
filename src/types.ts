@@ -23,6 +23,21 @@ export interface VoiceSDKConfig {
   mode?: 'voice' | 'text' | 'auto';
   /** Auto-discover window.nbt_functions and register as AI tools (default: true) */
   nbtFunctions?: boolean;
+  /** Conversation workflow definitions */
+  workflows?: WorkflowDefinition[];
+  /** Enable voice accessibility mode (ARIA live regions, keyboard shortcuts, high contrast) */
+  accessibility?: boolean | AccessibilityConfig;
+}
+
+export interface AccessibilityConfig {
+  /** Inject aria-live announcements (default: true) */
+  announcements?: boolean;
+  /** Auto-apply high contrast theme (default: true) */
+  highContrast?: boolean;
+  /** Speech rate multiplier for TTS (default: 0.85) */
+  ttsRate?: number;
+  /** Enable extra keyboard shortcuts (default: true) */
+  keyboardShortcuts?: boolean;
 }
 
 export interface AutoContextConfig {
@@ -63,12 +78,59 @@ export interface UIConfig {
   position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
   /** z-index for the SDK UI container */
   zIndex?: number;
-  /** Primary color (CSS value) */
+  /** Primary color (CSS value) — legacy shorthand, prefer theme.colors.primary */
   primaryColor?: string;
   /** Show transcript overlay */
   showTranscript?: boolean;
   /** Auto-hide transcript after this many ms of inactivity */
   transcriptAutoHideMs?: number;
+  /** Theme configuration */
+  theme?: ThemeConfig;
+}
+
+// ── Theming ──
+
+export interface ThemeColors {
+  primary?: string;
+  primaryHover?: string;
+  danger?: string;
+  dangerHover?: string;
+  background?: string;
+  backgroundOverlay?: string;
+  text?: string;
+  textMuted?: string;
+  border?: string;
+  shadow?: string;
+}
+
+export type ThemePreset = 'default' | 'minimal' | 'dark' | 'light';
+export type ThemeSize = 'sm' | 'md' | 'lg';
+export type ThemeColorScheme = 'auto' | 'light' | 'dark';
+
+export interface ThemeConfig {
+  /** Base preset to build on */
+  preset?: ThemePreset;
+  /** Color overrides */
+  colors?: ThemeColors;
+  /** Button/UI size variant */
+  size?: ThemeSize;
+  /** Border radius override (CSS value) */
+  borderRadius?: string;
+  /** Color scheme behavior */
+  colorScheme?: ThemeColorScheme;
+  /** Arbitrary CSS custom properties to inject */
+  customProperties?: Record<string, string>;
+}
+
+export interface ResolvedTheme {
+  colors: Required<ThemeColors>;
+  size: ThemeSize;
+  borderRadius: string;
+  colorScheme: ThemeColorScheme;
+  buttonSize: number;
+  iconSize: number;
+  panelMaxWidth: number;
+  customProperties: Record<string, string>;
 }
 
 // ── Gemini Tool Declarations ──
@@ -120,6 +182,35 @@ export interface FunctionResponse {
   response: { result: string };
 }
 
+// ── Workflows ──
+
+export interface WorkflowStep {
+  /** Instruction for the AI on this step */
+  instruction: string;
+  /** Field name to collect data into */
+  field?: string;
+  /** Validate collected value; return true or error message */
+  validate?: (value: string) => boolean | string;
+}
+
+export interface WorkflowDefinition {
+  /** Unique workflow name */
+  name: string;
+  /** Trigger phrase to auto-start (optional) */
+  trigger?: string;
+  /** Ordered steps */
+  steps: WorkflowStep[];
+  /** Called when all steps complete */
+  onComplete?: (data: Record<string, string>) => void;
+}
+
+export interface WorkflowState {
+  name: string;
+  currentStep: number;
+  totalSteps: number;
+  collectedData: Record<string, string>;
+}
+
 // ── Events ──
 
 export interface VoiceSDKEvents {
@@ -132,6 +223,10 @@ export interface VoiceSDKEvents {
   error: ErrorEvent;
   usage: UsageEvent;
   stateChange: StateChangeEvent;
+  'workflow:start': WorkflowState;
+  'workflow:step': WorkflowState;
+  'workflow:complete': WorkflowState;
+  'workflow:cancel': { name: string; reason: string };
 }
 
 export interface TranscriptEvent {

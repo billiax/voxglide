@@ -2,7 +2,8 @@ import type { UIConfig, TranscriptEvent } from '../types';
 import type { QueueState } from '../ai/types';
 import type { ConnectionStateValue } from '../constants';
 import { ConnectionState, DEFAULT_UI } from '../constants';
-import { SDK_STYLES } from './styles';
+import { buildStyles } from './styles';
+import { resolveTheme } from './themes';
 import { FloatingButton } from './FloatingButton';
 import { TranscriptOverlay } from './TranscriptOverlay';
 import { UIStateMachine } from './UIStateMachine';
@@ -46,16 +47,14 @@ export class UIManager {
 
     this.shadowRoot = this.host.attachShadow({ mode: 'open' });
 
-    // Inject styles
+    // Resolve theme and inject styles
+    const resolvedTheme = resolveTheme(this.config);
     const style = document.createElement('style');
-    style.textContent = SDK_STYLES;
+    style.textContent = buildStyles(resolvedTheme);
     this.shadowRoot.appendChild(style);
 
-    // Set custom properties
-    this.host.style.setProperty('--voice-sdk-primary', this.config.primaryColor);
-    this.shadowRoot.host.setAttribute('style',
-      `--voice-sdk-primary: ${this.config.primaryColor}; --vsdk-z-index: ${this.config.zIndex}`
-    );
+    // Set z-index custom property
+    this.shadowRoot.host.setAttribute('style', `--vsdk-z-index: ${this.config.zIndex}`);
 
     // Create wrapper container
     this.wrapper = document.createElement('div');
@@ -271,6 +270,13 @@ export class UIManager {
    */
   getStateMachine(): UIStateMachine {
     return this.stateMachine;
+  }
+
+  /**
+   * Get the Shadow DOM host element.
+   */
+  getHost(): HTMLElement {
+    return this.host;
   }
 
   destroy(): void {

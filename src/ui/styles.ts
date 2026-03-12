@@ -1,18 +1,46 @@
-export const SDK_STYLES = `
+import type { ResolvedTheme } from '../types';
+
+/**
+ * Build themed CSS for the SDK Shadow DOM.
+ * Injects resolved theme values as CSS custom properties.
+ */
+export function buildStyles(theme: ResolvedTheme): string {
+  const c = theme.colors;
+  const darkOverrides = theme.colorScheme === 'dark' ? '' : `
+  /* Dark mode */
+  @media (prefers-color-scheme: dark) {
+    :host {
+      --vsdk-bg: #1f2937;
+      --vsdk-bg-overlay: rgba(31, 41, 55, 0.95);
+      --vsdk-text: #f3f4f6;
+      --vsdk-text-muted: #9ca3af;
+      --vsdk-border: #374151;
+      --vsdk-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+    }
+  }`;
+
+  // Skip dark mode media query if colorScheme is explicitly 'light' or 'dark'
+  const darkSection = theme.colorScheme === 'light' ? '' : darkOverrides;
+
+  return `
   :host {
     all: initial;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    --vsdk-primary: var(--voice-sdk-primary, #2563eb);
-    --vsdk-primary-hover: var(--voice-sdk-primary-hover, #1d4ed8);
-    --vsdk-danger: #dc2626;
-    --vsdk-danger-hover: #b91c1c;
-    --vsdk-bg: #ffffff;
-    --vsdk-bg-overlay: rgba(255, 255, 255, 0.95);
-    --vsdk-text: #1f2937;
-    --vsdk-text-muted: #6b7280;
-    --vsdk-border: #e5e7eb;
-    --vsdk-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
-    --vsdk-radius: 12px;
+    --vsdk-primary: ${c.primary};
+    --vsdk-primary-hover: ${c.primaryHover};
+    --vsdk-danger: ${c.danger};
+    --vsdk-danger-hover: ${c.dangerHover};
+    --vsdk-bg: ${c.background};
+    --vsdk-bg-overlay: ${c.backgroundOverlay};
+    --vsdk-text: ${c.text};
+    --vsdk-text-muted: ${c.textMuted};
+    --vsdk-border: ${c.border};
+    --vsdk-shadow: ${c.shadow};
+    --vsdk-radius: ${theme.borderRadius};
+    --vsdk-paused: #d97706;
+    --vsdk-paused-hover: #b45309;
+    --vsdk-success: #3fb950;
+${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join('\n')}
   }
 
   * {
@@ -53,8 +81,8 @@ export const SDK_STYLES = `
   /* Floating mic button */
   .vsdk-btn {
     pointer-events: auto;
-    width: 56px;
-    height: 56px;
+    width: ${theme.buttonSize}px;
+    height: ${theme.buttonSize}px;
     border-radius: 50%;
     border: none;
     cursor: pointer;
@@ -86,12 +114,12 @@ export const SDK_STYLES = `
   }
 
   .vsdk-btn.paused {
-    background: #d97706;
+    background: var(--vsdk-paused);
     animation: vsdk-pulse-amber 2s ease-in-out infinite;
   }
 
   .vsdk-btn.paused:hover {
-    background: #b45309;
+    background: var(--vsdk-paused-hover);
   }
 
   .vsdk-btn.connecting {
@@ -105,8 +133,18 @@ export const SDK_STYLES = `
   }
 
   .vsdk-btn svg {
-    width: 24px;
-    height: 24px;
+    width: ${theme.iconSize}px;
+    height: ${theme.iconSize}px;
+  }
+
+  /* Focus-visible outlines for all interactive elements */
+  .vsdk-btn:focus-visible,
+  .vsdk-panel-close:focus-visible,
+  .vsdk-text-send:focus-visible,
+  .vsdk-text-input:focus-visible,
+  .vsdk-queue-cancel:focus-visible {
+    outline: 2px solid var(--vsdk-primary);
+    outline-offset: 2px;
   }
 
   @keyframes vsdk-pulse {
@@ -133,13 +171,14 @@ export const SDK_STYLES = `
     border-radius: var(--vsdk-radius);
     box-shadow: var(--vsdk-shadow);
     padding: 12px 16px;
-    max-width: 320px;
+    max-width: ${theme.panelMaxWidth}px;
     min-width: 200px;
     max-height: 200px;
     overflow-y: auto;
     opacity: 0;
     transform: translateY(8px);
     transition: opacity 0.2s, transform 0.2s;
+    role: log;
   }
 
   .vsdk-transcript.visible {
@@ -251,7 +290,7 @@ export const SDK_STYLES = `
   }
 
   .vsdk-tool-status.completed::before {
-    background: #3fb950;
+    background: var(--vsdk-success);
     animation: none;
   }
 
@@ -381,7 +420,7 @@ export const SDK_STYLES = `
   }
 
   .vsdk-queue-dot.executing-tools {
-    background: #d97706;
+    background: var(--vsdk-paused);
     animation: vsdk-pulse-amber 1.5s ease-in-out infinite;
   }
 
@@ -431,15 +470,48 @@ export const SDK_STYLES = `
     }
   }
 
-  /* Dark mode */
-  @media (prefers-color-scheme: dark) {
-    :host {
-      --vsdk-bg: #1f2937;
-      --vsdk-bg-overlay: rgba(31, 41, 55, 0.95);
-      --vsdk-text: #f3f4f6;
-      --vsdk-text-muted: #9ca3af;
-      --vsdk-border: #374151;
-      --vsdk-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-    }
+  /* High contrast mode */
+  :host(.high-contrast) {
+    --vsdk-text: #000000;
+    --vsdk-bg: #ffffff;
+    --vsdk-border: #000000;
   }
+
+  :host(.high-contrast) .vsdk-btn:focus-visible,
+  :host(.high-contrast) .vsdk-panel-close:focus-visible,
+  :host(.high-contrast) .vsdk-text-send:focus-visible,
+  :host(.high-contrast) .vsdk-text-input:focus-visible,
+  :host(.high-contrast) .vsdk-queue-cancel:focus-visible {
+    outline: 3px solid #facc15;
+    outline-offset: 2px;
+  }
+
+  :host(.high-contrast) .vsdk-btn {
+    border: 2px solid #000000;
+  }
+${darkSection}
 `;
+}
+
+/** Default styles (backward compat — uses default theme) */
+export const SDK_STYLES = buildStyles({
+  colors: {
+    primary: '#2563eb',
+    primaryHover: '#1d4ed8',
+    danger: '#dc2626',
+    dangerHover: '#b91c1c',
+    background: '#ffffff',
+    backgroundOverlay: 'rgba(255, 255, 255, 0.95)',
+    text: '#1f2937',
+    textMuted: '#6b7280',
+    border: '#e5e7eb',
+    shadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+  },
+  size: 'md',
+  borderRadius: '12px',
+  colorScheme: 'auto',
+  buttonSize: 56,
+  iconSize: 24,
+  panelMaxWidth: 320,
+  customProperties: {},
+});
