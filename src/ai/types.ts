@@ -8,6 +8,17 @@ export interface ProxySessionConfig {
   speechEnabled: boolean;
 }
 
+export interface QueueItem {
+  turnId: string;
+  text: string;
+  status: 'queued' | 'processing' | 'executing-tools';
+}
+
+export interface QueueState {
+  active: QueueItem | null;
+  queued: QueueItem[];
+}
+
 export interface ProxySessionCallbacks {
   onStatusChange: (status: string) => void;
   onTranscript: (text: string, speaker: 'user' | 'ai', isFinal: boolean) => void;
@@ -17,6 +28,7 @@ export interface ProxySessionCallbacks {
   onTokenUpdate: (usage: TokenUsage) => void;
   onDebug: (event: DebugEvent) => void;
   onSpeechStateChange?: (active: boolean, paused: boolean) => void;
+  onQueueUpdate?: (queue: QueueState) => void;
 }
 
 export interface TokenUsage {

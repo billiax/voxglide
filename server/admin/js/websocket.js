@@ -96,6 +96,14 @@ function handleMessage(msg) {
       }
       break;
 
+    case 'session.queue': {
+      const sess = state.sessions.get(msg.sessionId);
+      if (sess) {
+        sess.queue = { active: msg.active, queued: msg.queued };
+      }
+      break;
+    }
+
     case 'session.screenshot': {
       // Store screenshot on the session (latest per URL)
       const sess = state.sessions.get(msg.sessionId);

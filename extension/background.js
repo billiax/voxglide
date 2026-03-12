@@ -1,3 +1,13 @@
+// Inject code into a tab's MAIN world
+async function executeInTab(tabId, code) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: (c) => { new Function(c)(); },
+    args: [code],
+  });
+}
+
 // Fetch SDK script (bypasses CSP/mixed content) and inject with init code
 async function injectIntoTab(tabId, scriptUrl, initCode) {
   let combinedCode = '';
@@ -16,12 +26,39 @@ async function injectIntoTab(tabId, scriptUrl, initCode) {
 
   if (!combinedCode) return;
 
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    world: 'MAIN',
-    func: (code) => { new Function(code)(); },
-    args: [combinedCode],
-  });
+  await executeInTab(tabId, combinedCode);
+}
+
+// After SDK injection, check if nbt_functions should be auto-injected for this domain
+async function injectNbtFunctions(tabId, httpBase, tabUrl) {
+  try {
+    const manifestUrl = `${httpBase}/sdk/functions/manifest.json`;
+    const res = await fetch(manifestUrl, {
+      headers: { 'ngrok-skip-browser-warning': '1' },
+    });
+    if (!res.ok) return;
+
+    const manifest = await res.json();
+    if (!manifest.functions || !Array.isArray(manifest.functions)) return;
+
+    const hostname = new URL(tabUrl).hostname;
+
+    for (const entry of manifest.functions) {
+      if (!entry.match || !entry.script) continue;
+      if (!hostname.includes(entry.match)) continue;
+
+      const scriptUrl = `${httpBase}/sdk/functions/${entry.script}`;
+      const scriptRes = await fetch(scriptUrl, {
+        headers: { 'ngrok-skip-browser-warning': '1' },
+      });
+      if (!scriptRes.ok) continue;
+
+      const code = await scriptRes.text();
+      await executeInTab(tabId, code);
+    }
+  } catch {
+    // Fail silently — nbt_functions injection is best-effort
+  }
 }
 
 // Build injection params from stored settings
@@ -57,14 +94,19 @@ function buildInjectionParams(data) {
 
   const initCode = `new VoiceSDK({\n${entries}\n});`;
 
-  return { scriptUrl, initCode };
+  return { scriptUrl, initCode, httpBase };
 }
 
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'inject') {
     injectIntoTab(msg.tabId, msg.scriptUrl, msg.initCode)
-      .then(() => sendResponse({ success: true }))
+      .then(async () => {
+        if (msg.httpBase && msg.tabUrl) {
+          await injectNbtFunctions(msg.tabId, msg.httpBase, msg.tabUrl);
+        }
+        sendResponse({ success: true });
+      })
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
@@ -83,7 +125,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       const params = buildInjectionParams(data);
       if (!params) return;
 
-      injectIntoTab(tabId, params.scriptUrl, params.initCode).catch(() => {});
+      injectIntoTab(tabId, params.scriptUrl, params.initCode)
+        .then(() => injectNbtFunctions(tabId, params.httpBase, tab.url))
+        .catch(() => {});
     }
   );
 });

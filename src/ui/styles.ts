@@ -352,6 +352,85 @@ export const SDK_STYLES = `
     opacity: 0.6;
   }
 
+  /* Queue panel */
+  .vsdk-queue-panel {
+    border-top: 1px solid var(--vsdk-border);
+    padding: 6px 0 2px;
+    margin-top: 4px;
+  }
+
+  .vsdk-queue-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 12px;
+    animation: vsdk-queue-enter 0.15s ease-out;
+  }
+
+  .vsdk-queue-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .vsdk-queue-dot.processing {
+    background: var(--vsdk-primary);
+    animation: vsdk-pulse 1s ease-in-out infinite;
+  }
+
+  .vsdk-queue-dot.executing-tools {
+    background: #d97706;
+    animation: vsdk-pulse-amber 1.5s ease-in-out infinite;
+  }
+
+  .vsdk-queue-dot.queued {
+    background: var(--vsdk-text-muted);
+  }
+
+  .vsdk-queue-item-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--vsdk-text-muted);
+    font-style: italic;
+  }
+
+  .vsdk-queue-cancel {
+    border: none;
+    background: none;
+    color: var(--vsdk-text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 4px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+  }
+
+  .vsdk-queue-item:hover .vsdk-queue-cancel {
+    opacity: 1;
+  }
+
+  .vsdk-queue-cancel:hover {
+    color: var(--vsdk-danger);
+    background: rgba(220, 38, 38, 0.1);
+  }
+
+  @keyframes vsdk-queue-enter {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (hover: none) {
+    .vsdk-queue-cancel {
+      opacity: 1;
+    }
+  }
+
   /* Dark mode */
   @media (prefers-color-scheme: dark) {
     :host {

@@ -23,6 +23,8 @@ export type {
   PageContext,
   InteractiveElement,
   ElementCapability,
+  NbtFunctionDef,
+  NbtParameterDef,
 } from './types';
 
 // Sub-components (for advanced usage)
@@ -33,6 +35,7 @@ export { InteractiveElementScanner } from './context/InteractiveElementScanner';
 export { TokenBudget } from './context/TokenBudget';
 export { ContextCache } from './context/ContextCache';
 export { ActionRouter } from './actions/ActionRouter';
+export { NbtFunctionsProvider } from './actions/NbtFunctionsProvider';
 export { NavigationObserver } from './NavigationObserver';
 export type { NavigationEvent, NavigationCallback, BeforeUnloadCallback } from './NavigationObserver';
 export { EventEmitter } from './events';

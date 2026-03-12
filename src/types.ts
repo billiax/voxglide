@@ -21,6 +21,8 @@ export interface VoiceSDKConfig {
   autoReconnect?: boolean;
   /** Input mode: 'voice' (default), 'text' (no mic), or 'auto' (fallback to text) */
   mode?: 'voice' | 'text' | 'auto';
+  /** Auto-discover window.nbt_functions and register as AI tools (default: true) */
+  nbtFunctions?: boolean;
 }
 
 export interface AutoContextConfig {
@@ -205,4 +207,26 @@ export interface PageContext {
   navigation: { text: string; href: string }[];
   content: string;
   interactiveElements: InteractiveElement[];
+}
+
+// ── nbt_functions (window.nbt_functions auto-discovery) ──
+
+/** Developer-friendly function definition for window.nbt_functions */
+export interface NbtFunctionDef {
+  description: string;
+  parameters?: Record<string, NbtParameterDef>;
+  handler: (args: Record<string, unknown>) => Promise<unknown> | unknown;
+}
+
+export interface NbtParameterDef {
+  type: string;          // "string", "number", "boolean", "integer"
+  description: string;
+  required?: boolean;
+  enum?: string[];
+}
+
+declare global {
+  interface Window {
+    nbt_functions?: Record<string, NbtFunctionDef>;
+  }
 }

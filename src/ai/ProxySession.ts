@@ -17,11 +17,11 @@ export class ProxySession {
   // Speech debounce: batches rapid isFinal results into a single send
   private speechDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private speechDebounceText = '';
-  private static readonly SPEECH_DEBOUNCE_MS = 800;
+  private static readonly SPEECH_DEBOUNCE_MS = 150;
 
   // Speech debounce max delay cap
   private speechDebounceStart: number | null = null;
-  private static readonly SPEECH_MAX_DEBOUNCE_MS = 2000;
+  private static readonly SPEECH_MAX_DEBOUNCE_MS = 500;
 
   // Send queue: buffers text messages when WS is not OPEN
   private sendQueue: Array<{ type: string;[key: string]: any }> = [];
@@ -33,6 +33,7 @@ export class ProxySession {
 
   // Pending context update during speech debounce
   private pendingContextUpdate: string | null = null;
+  private pendingContextTools: unknown[] | undefined = undefined;
 
   /** The server-assigned session ID, available after connection. */
   public sessionId: string | null = null;
@@ -151,6 +152,13 @@ export class ProxySession {
 
       case 'session.stopped':
         this.callbacks.onStatusChange('disconnected');
+        break;
+
+      case 'queue.update':
+        this.callbacks.onQueueUpdate?.({
+          active: msg.active || null,
+          queued: msg.queued || [],
+        });
         break;
 
       case 'screenshot.request':
@@ -318,9 +326,13 @@ export class ProxySession {
   private flushPendingContextUpdate(): void {
     if (this.pendingContextUpdate !== null) {
       const context = this.pendingContextUpdate;
+      const tools = this.pendingContextTools;
       this.pendingContextUpdate = null;
+      this.pendingContextTools = undefined;
       this.debug({ direction: 'send', kind: 'context.update', payload: { length: context.length, deferred: true } });
-      this.send({ type: 'context.update', context });
+      const payload: Record<string, unknown> = { type: 'context.update', context };
+      if (tools) payload.tools = tools;
+      this.send(payload);
     }
   }
 
@@ -427,16 +439,20 @@ export class ProxySession {
   /**
    * Send a context update to the server mid-session.
    * If speech debounce is pending, defers the update to avoid interleaving.
+   * Optional tools param sends updated tool declarations alongside context.
    */
-  sendContextUpdate(context: string): void {
+  sendContextUpdate(context: string, tools?: unknown[]): void {
     // If speech debounce is in progress, defer context update
     if (this.speechDebounceTimer !== null) {
       this.pendingContextUpdate = context;
+      this.pendingContextTools = tools;
       this.debug({ direction: 'send', kind: 'context.update', payload: { length: context.length, deferred: true } });
       return;
     }
     this.debug({ direction: 'send', kind: 'context.update', payload: { length: context.length } });
-    this.send({ type: 'context.update', context });
+    const payload: Record<string, unknown> = { type: 'context.update', context };
+    if (tools) payload.tools = tools;
+    this.send(payload);
   }
 
   /**
@@ -495,6 +511,13 @@ export class ProxySession {
     }
     this.speechCapture.retrySpeech();
     this.notifySpeechState();
+  }
+
+  /**
+   * Cancel a queued or active turn by its turnId.
+   */
+  cancelTurn(turnId: string): void {
+    this.send({ type: 'turn.cancel', turnId });
   }
 
   isConnected(): boolean {

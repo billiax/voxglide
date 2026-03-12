@@ -150,7 +150,7 @@ injectBtn.addEventListener('click', () => {
 
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     chrome.runtime.sendMessage(
-      { action: 'inject', tabId: tabs[0].id, scriptUrl, initCode },
+      { action: 'inject', tabId: tabs[0].id, scriptUrl, initCode, httpBase: parsed.httpBase, tabUrl: tabs[0].url },
       (response) => {
         if (response?.success) {
           statusEl.textContent = 'Injected';

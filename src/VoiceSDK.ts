@@ -6,6 +6,7 @@ import { PageContextProvider } from './context/PageContextProvider';
 import { ActionRouter } from './actions/ActionRouter';
 import { NavigationHandler } from './actions/NavigationHandler';
 import { NavigationObserver } from './NavigationObserver';
+import { NbtFunctionsProvider } from './actions/NbtFunctionsProvider';
 import { invalidateElementCache, setIndexResolver, setRescanCallback, setPostClickCallback } from './actions/DOMActions';
 import { builtInTools } from './actions/tools';
 import { UIManager } from './ui/UIManager';
@@ -35,6 +36,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   private toggling = false;
   private lastScreenshotUrl: string | null = null;
   private navigationObserver: NavigationObserver | null = null;
+  private nbtFunctionsProvider: NbtFunctionsProvider | null = null;
   private contextChangeTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSentSystemInstruction: string | null = null;
   private lastSentScanFingerprint: string | null = null;
@@ -95,6 +97,18 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     // Register custom actions
     if (config.actions?.custom) {
       this.actionRouter.registerCustomActions(config.actions.custom);
+    }
+
+    // Auto-discover window.nbt_functions
+    if (config.nbtFunctions !== false) {
+      this.nbtFunctionsProvider = new NbtFunctionsProvider(
+        (added, removed) => this.handleNbtFunctionsChanged(added, removed),
+        config.debug,
+      );
+      const initialActions = this.nbtFunctionsProvider.getActions();
+      if (Object.keys(initialActions).length > 0) {
+        this.actionRouter.registerCustomActions(initialActions);
+      }
     }
 
     // Set up UI (unless disabled)
@@ -220,10 +234,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           this.emit('transcript', event);
           this.ui?.addTranscript(event);
 
-          // Show/hide AI thinking indicator
-          if (speaker === 'user' && isFinal) {
-            this.ui?.setAIThinking(true);
-          } else if (speaker === 'ai' && isFinal) {
+          // Hide AI thinking indicator on final AI response
+          // (queue panel now shows processing state instead of thinking indicator on user send)
+          if (speaker === 'ai' && isFinal) {
             this.ui?.setAIThinking(false);
           }
 
@@ -271,7 +284,13 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           this.speechCurrentlyActive = active;
           this.ui?.setSpeechState(active, paused);
         },
+        onQueueUpdate: (queue) => {
+          this.ui?.updateQueue(queue);
+        },
       });
+
+      // Wire cancel handler from queue panel to session
+      this.ui?.setCancelHandler((turnId) => this.session?.cancelTurn(turnId));
 
       await this.session.connect();
     } catch (error: any) {
@@ -454,7 +473,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         console.log('[VoiceSDK:context] DOM changed, sending context update to server');
       }
 
-      this.session.sendContextUpdate(systemInstruction);
+      this.session.sendContextUpdate(systemInstruction, [{ functionDeclarations: allTools }]);
       // Send structured scan data for admin visualization
       this.sendScanDataToServer();
     } catch (error: any) {
@@ -478,6 +497,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
 
     // Ensure UI is still attached (SPA may have replaced body children)
     this.ui?.ensureAttached();
+
+    // Re-check nbt_functions (page may expose different functions per route)
+    this.nbtFunctionsProvider?.sync();
 
     // Force a context re-scan if we have an active session
     if (this.pageContextProvider) {
@@ -529,6 +551,30 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
       this.pageContextProvider.markDirty();
     }
     this.handleContextChange();
+  }
+
+  /**
+   * Handle nbt_functions changes (added/removed functions).
+   * Re-registers handlers with ActionRouter and pushes updated tools to server if connected.
+   */
+  private handleNbtFunctionsChanged(added: string[], removed: string[]): void {
+    for (const name of removed) {
+      this.actionRouter.removeHandler(name);
+    }
+    if (this.nbtFunctionsProvider && added.length > 0) {
+      const allActions = this.nbtFunctionsProvider.getActions();
+      const newActions: Record<string, import('./types').CustomAction> = {};
+      for (const name of added) {
+        if (allActions[name]) newActions[name] = allActions[name];
+      }
+      if (Object.keys(newActions).length > 0) {
+        this.actionRouter.registerCustomActions(newActions);
+      }
+    }
+    // Push updated tools to server if mid-session
+    if (this.session && this.connectionState === ConnectionState.CONNECTED) {
+      this.handleContextChange();
+    }
   }
 
   /**
@@ -622,6 +668,8 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     setIndexResolver(null);
     setRescanCallback(null);
     setPostClickCallback(null);
+    this.nbtFunctionsProvider?.destroy();
+    this.nbtFunctionsProvider = null;
     this.navigationObserver?.destroy();
     this.navigationObserver = null;
     this.ui?.clearTranscript();
@@ -686,6 +734,11 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
       for (const action of Object.values(this.config.actions.custom)) {
         tools.push(action.declaration);
       }
+    }
+
+    // Add nbt_functions tool declarations
+    if (this.nbtFunctionsProvider) {
+      tools.push(...this.nbtFunctionsProvider.getToolDeclarations());
     }
 
     return tools;

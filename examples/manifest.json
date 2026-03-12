@@ -1,0 +1,8 @@
+{
+  "functions": [
+    {
+      "match": "it-app.nextbt.ai",
+      "script": "it-tools/nbt_functions.js"
+    }
+  ]
+}
