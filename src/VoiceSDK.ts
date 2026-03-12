@@ -220,10 +220,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           this.emit('transcript', event);
           this.ui?.addTranscript(event);
 
-          // Show/hide AI thinking indicator
-          if (speaker === 'user' && isFinal) {
-            this.ui?.setAIThinking(true);
-          } else if (speaker === 'ai' && isFinal) {
+          // Hide AI thinking indicator on final AI response
+          // (queue panel now shows processing state instead of thinking indicator on user send)
+          if (speaker === 'ai' && isFinal) {
             this.ui?.setAIThinking(false);
           }
 
@@ -271,7 +270,13 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           this.speechCurrentlyActive = active;
           this.ui?.setSpeechState(active, paused);
         },
+        onQueueUpdate: (queue) => {
+          this.ui?.updateQueue(queue);
+        },
       });
+
+      // Wire cancel handler from queue panel to session
+      this.ui?.setCancelHandler((turnId) => this.session?.cancelTurn(turnId));
 
       await this.session.connect();
     } catch (error: any) {

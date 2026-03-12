@@ -170,12 +170,12 @@ describe('ProxySession', () => {
       const debounceFn = (session as any).debounceSpeechSend.bind(session);
 
       debounceFn('hello');
-      vi.advanceTimersByTime(500); // 500ms in, not yet fired
+      vi.advanceTimersByTime(100); // 100ms in, not yet fired (150ms debounce)
       debounceFn('world');
-      vi.advanceTimersByTime(500); // 500ms after second call, still not 800
+      vi.advanceTimersByTime(100); // 100ms after second call, still not 150
       expect(ws.sentOfType('text')).toHaveLength(0);
 
-      vi.advanceTimersByTime(300); // Now 800ms after second call
+      vi.advanceTimersByTime(50); // Now 150ms after second call
       const msgs = ws.sentOfType('text');
       expect(msgs).toHaveLength(1);
       expect(msgs[0].text).toBe('hello world');
@@ -377,6 +377,68 @@ describe('ProxySession', () => {
       const { session } = await connectSession();
       await session.disconnect();
       expect(session.isConnected()).toBe(false);
+    });
+  });
+
+  // ── Queue Update Tests ──
+
+  describe('queue.update', () => {
+    it('calls onQueueUpdate when queue.update message received', async () => {
+      const onQueueUpdate = vi.fn();
+      const { session, ws } = await connectSession({}, { onQueueUpdate });
+
+      ws.simulateMessage({
+        type: 'queue.update',
+        active: { turnId: 't1', text: 'hello', status: 'processing' },
+        queued: [{ turnId: 't2', text: 'world', status: 'queued' }],
+      });
+
+      expect(onQueueUpdate).toHaveBeenCalledWith({
+        active: { turnId: 't1', text: 'hello', status: 'processing' },
+        queued: [{ turnId: 't2', text: 'world', status: 'queued' }],
+      });
+
+      await session.disconnect();
+    });
+
+    it('handles empty queue.update', async () => {
+      const onQueueUpdate = vi.fn();
+      const { session, ws } = await connectSession({}, { onQueueUpdate });
+
+      ws.simulateMessage({ type: 'queue.update', active: null, queued: [] });
+
+      expect(onQueueUpdate).toHaveBeenCalledWith({ active: null, queued: [] });
+
+      await session.disconnect();
+    });
+
+    it('does not throw when onQueueUpdate is not set', async () => {
+      const { session, ws } = await connectSession();
+
+      // Should not throw
+      ws.simulateMessage({
+        type: 'queue.update',
+        active: null,
+        queued: [],
+      });
+
+      await session.disconnect();
+    });
+  });
+
+  // ── Cancel Turn Tests ──
+
+  describe('cancelTurn', () => {
+    it('sends turn.cancel message', async () => {
+      const { session, ws } = await connectSession();
+
+      session.cancelTurn('turn-123');
+
+      const cancelMsgs = ws.sentOfType('turn.cancel');
+      expect(cancelMsgs).toHaveLength(1);
+      expect(cancelMsgs[0].turnId).toBe('turn-123');
+
+      await session.disconnect();
     });
   });
 });

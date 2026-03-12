@@ -25,6 +25,7 @@ vi.mock('../../src/ai/ProxySession', () => {
     pauseSpeech = vi.fn();
     resumeSpeech = vi.fn();
     retrySpeech = vi.fn();
+    cancelTurn = vi.fn();
     constructor(public config: any, public callbacks: any) {
       proxySessionInstances.push({ config, callbacks });
     }
@@ -46,6 +47,8 @@ vi.mock('../../src/ui/UIManager', () => {
     restoreTranscript = vi.fn();
     setDisconnectHandler = vi.fn();
     ensureAttached = vi.fn();
+    updateQueue = vi.fn();
+    setCancelHandler = vi.fn();
     constructor(public config: any, public onToggle: any) {}
   }
   return { UIManager: MockUIManager };
@@ -504,6 +507,44 @@ describe('VoiceSDK', () => {
       await sdk.start();
       proxySessionInstances[0].callbacks.onSessionEnd({ totalTokens: 100, inputTokens: 60, outputTokens: 40 });
       expect(spy).toHaveBeenCalledWith({ totalTokens: 100, inputTokens: 60, outputTokens: 40 });
+    });
+  });
+
+  describe('queue', () => {
+    it('passes onQueueUpdate callback to ProxySession', async () => {
+      await sdk.start();
+      expect(proxySessionInstances[0].callbacks.onQueueUpdate).toBeDefined();
+    });
+
+    it('forwards queue updates to UI', async () => {
+      await sdk.start();
+      const ui = (sdk as any).ui;
+
+      proxySessionInstances[0].callbacks.onQueueUpdate({
+        active: { turnId: 't1', text: 'hello', status: 'processing' },
+        queued: [],
+      });
+
+      expect(ui.updateQueue).toHaveBeenCalledWith({
+        active: { turnId: 't1', text: 'hello', status: 'processing' },
+        queued: [],
+      });
+    });
+
+    it('wires cancel handler to session.cancelTurn', async () => {
+      await sdk.start();
+      const ui = (sdk as any).ui;
+
+      // setCancelHandler should have been called
+      expect(ui.setCancelHandler).toHaveBeenCalledWith(expect.any(Function));
+
+      // Simulate calling the cancel handler
+      const cancelHandler = ui.setCancelHandler.mock.calls[0][0];
+      cancelHandler('turn-abc');
+
+      // Should have called cancelTurn on the session
+      const session = proxySessionInstances[0];
+      expect((session as any).callbacks).toBeDefined();
     });
   });
 

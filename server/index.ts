@@ -58,6 +58,14 @@ interface PendingToolTurn {
   timeoutId: ReturnType<typeof setTimeout>;
 }
 
+interface QueuedTurn {
+  turnId: string;
+  text: string;
+  historyIndex: number;  // index into session.history for the user message
+  status: 'queued' | 'processing' | 'executing-tools';
+  abortController: AbortController | null;
+}
+
 interface TrackedSession {
   session: Session | null;
   id: string;
@@ -70,9 +78,9 @@ interface TrackedSession {
   clientWs: WebSocket | null;
   cleanupTimer: ReturnType<typeof setTimeout> | null;
   pendingToolResultsByTurn: Map<string, PendingToolTurn>;
-  turnQueue: Array<() => Promise<void>>;
+  turnQueue: QueuedTurn[];
   turnProcessing: boolean;
-  abortController: AbortController | null;
+  activeTurn: QueuedTurn | null;
   lastScanData: any | null;
   screenshots: Map<string, string>; // url -> base64 image (latest per URL)
 }
@@ -121,6 +129,31 @@ function getSessionSummary(tracked: TrackedSession) {
     lastScanData: tracked.lastScanData,
     screenshots: Object.fromEntries(tracked.screenshots),
   };
+}
+
+// ── Queue State Broadcasting ──
+
+function broadcastQueueState(tracked: TrackedSession): void {
+  const active = tracked.activeTurn ? {
+    turnId: tracked.activeTurn.turnId,
+    text: tracked.activeTurn.text,
+    status: tracked.activeTurn.status,
+  } : null;
+  const queued = tracked.turnQueue
+    .filter(t => t.status === 'queued')
+    .map(t => ({ turnId: t.turnId, text: t.text, status: t.status }));
+
+  // Notify SDK client
+  if (tracked.clientWs) {
+    sendToClient(tracked.clientWs, { type: 'queue.update', active, queued });
+  }
+  // Notify admin clients
+  broadcastToAdmins({
+    type: 'session.queue',
+    sessionId: tracked.id,
+    active,
+    queued,
+  });
 }
 
 // ── Pending Tool Results Management ──
@@ -483,8 +516,8 @@ function handleSessionStart(clientWs: WebSocket, msg: any): void {
     }
 
     // Abort in-flight streaming
-    existing.abortController?.abort();
-    existing.abortController = null;
+    existing.activeTurn?.abortController?.abort();
+    existing.activeTurn = null;
 
     // Reject pending tool promises
     rejectAllPendingToolResults(existing, 'Client reconnected');
@@ -559,7 +592,7 @@ function handleSessionStart(clientWs: WebSocket, msg: any): void {
     pendingToolResultsByTurn: new Map(),
     turnQueue: [],
     turnProcessing: false,
-    abortController: null,
+    activeTurn: null,
     lastScanData: null,
     screenshots: new Map(),
   };
@@ -599,7 +632,6 @@ function handleText(tracked: TrackedSession, msg: any): void {
   if (!userText) return;
 
   tracked.messageCount++;
-  logSessionEvent(tracked, 'text', { text: userText });
 
   // Emergency history cap
   if (tracked.session.history.length > MAX_HISTORY_ENTRIES) {
@@ -608,26 +640,40 @@ function handleText(tracked: TrackedSession, msg: any): void {
     tracked.session.history.push(...kept);
   }
 
-  tracked.session.history.push({ role: 'user', parts: [{ text: userText }] });
-
-  enqueueTurn(tracked, async () => {
-    const turnId = crypto.randomUUID();
-    const abortController = new AbortController();
-    tracked.abortController = abortController;
-    try {
-      await maybeSummarizeHistory(tracked.session!, tracked);
-      await handleTurnStreaming(tracked, turnId, abortController.signal);
-    } catch (err: any) {
-      if (!abortController.signal.aborted) {
-        sendToClient(tracked.clientWs!, { type: 'error', message: err.message });
-        logSessionEvent(tracked, 'error', { message: err.message });
-      }
-    } finally {
-      if (tracked.abortController === abortController) {
-        tracked.abortController = null;
-      }
+  // Merge into last queued turn if it hasn't started processing yet
+  const lastQueued = tracked.turnQueue[tracked.turnQueue.length - 1];
+  if (lastQueued && lastQueued.status === 'queued') {
+    // Merge: append text to existing history entry and queued turn
+    const historyEntry = tracked.session.history[lastQueued.historyIndex];
+    if (historyEntry && historyEntry.parts?.[0]) {
+      (historyEntry.parts[0] as any).text += ' ' + userText;
     }
-  });
+    lastQueued.text += ' ' + userText;
+    logSessionEvent(tracked, 'text.merged', { text: userText, turnId: lastQueued.turnId, mergedText: lastQueued.text });
+    broadcastQueueState(tracked);
+    return;
+  }
+
+  // New turn: push user message to history, create QueuedTurn
+  tracked.session.history.push({ role: 'user', parts: [{ text: userText }] });
+  const historyIndex = tracked.session.history.length - 1;
+  const turnId = crypto.randomUUID();
+
+  const queuedTurn: QueuedTurn = {
+    turnId,
+    text: userText,
+    historyIndex,
+    status: 'queued',
+    abortController: null,
+  };
+
+  tracked.turnQueue.push(queuedTurn);
+  logSessionEvent(tracked, 'text', { text: userText, turnId });
+  broadcastQueueState(tracked);
+
+  if (!tracked.turnProcessing) {
+    processTurnQueue(tracked);
+  }
 }
 
 function handleToolResult(tracked: TrackedSession, msg: any): void {
@@ -713,7 +759,8 @@ function handleWsClose(clientWs: WebSocket): void {
   tracked.disconnected = true;
   tracked.disconnectedAt = Date.now();
   tracked.clientWs = null;
-  tracked.abortController?.abort();  // Cancel streaming
+  tracked.activeTurn?.abortController?.abort();  // Cancel streaming
+  tracked.activeTurn = null;
   rejectAllPendingToolResults(tracked, 'Client disconnected');  // Unblock promises
   tracked.turnQueue.length = 0;
   tracked.turnProcessing = false;
@@ -762,6 +809,7 @@ sdkWss.on('connection', (clientWs, req) => {
       case 'tool.progress': handleToolProgress(tracked, msg); break;
       case 'scan': handleScan(tracked, msg); break;
       case 'context.update': handleContextUpdate(tracked, msg); break;
+      case 'turn.cancel': handleTurnCancel(tracked, msg); break;
       case 'session.stop': handleSessionStop(tracked); break;
       case 'screenshot': {
         // Auto or on-demand screenshot from SDK client
@@ -801,25 +849,69 @@ sdkWss.on('connection', (clientWs, req) => {
 
 // ── Turn Queue: serial execution of LLM turns per session ──
 
-function enqueueTurn(tracked: TrackedSession, fn: () => Promise<void>): void {
-  tracked.turnQueue.push(fn);
-  if (!tracked.turnProcessing) {
-    processTurnQueue(tracked);
-  }
-}
-
 async function processTurnQueue(tracked: TrackedSession): Promise<void> {
   tracked.turnProcessing = true;
   while (tracked.turnQueue.length > 0) {
-    const fn = tracked.turnQueue.shift()!;
+    const queuedTurn = tracked.turnQueue[0];
+    queuedTurn.status = 'processing';
+    const abortController = new AbortController();
+    queuedTurn.abortController = abortController;
+    tracked.activeTurn = queuedTurn;
+    broadcastQueueState(tracked);
+
     try {
-      await fn();
+      await maybeSummarizeHistory(tracked.session!, tracked);
+      await handleTurnStreaming(tracked, queuedTurn.turnId, abortController.signal);
     } catch (err: any) {
-      console.error('[voxglide] Turn queue error:', err.message);
-      logSessionEvent(tracked, 'error', { message: `Turn queue error: ${err.message}` });
+      if (!abortController.signal.aborted) {
+        sendToClient(tracked.clientWs!, { type: 'error', message: err.message });
+        logSessionEvent(tracked, 'error', { message: `Turn queue error: ${err.message}` });
+      }
+    } finally {
+      tracked.activeTurn = null;
+      tracked.turnQueue.shift();
+      broadcastQueueState(tracked);
     }
   }
   tracked.turnProcessing = false;
+}
+
+// ── Turn Cancel ──
+
+function handleTurnCancel(tracked: TrackedSession, msg: any): void {
+  const targetTurnId = msg.turnId;
+  if (!targetTurnId) return;
+
+  // Cancel active turn
+  const activeTurn = tracked.activeTurn;
+  if (activeTurn && activeTurn.turnId === targetTurnId) {
+    activeTurn.abortController?.abort();
+    logSessionEvent(tracked, 'turn.cancelled', { turnId: targetTurnId, wasActive: true });
+    // The aborted stream throws, processTurnQueue catches and moves to next turn
+    return;
+  }
+
+  // Cancel queued turn
+  const queueIndex = tracked.turnQueue.findIndex(t => t.turnId === targetTurnId);
+  if (queueIndex >= 0) {
+    const cancelled = tracked.turnQueue[queueIndex];
+
+    // Remove the corresponding history entry
+    if (tracked.session && cancelled.historyIndex < tracked.session.history.length) {
+      tracked.session.history.splice(cancelled.historyIndex, 1);
+      // Adjust historyIndex for subsequent turns
+      for (let i = queueIndex + 1; i < tracked.turnQueue.length; i++) {
+        if (tracked.turnQueue[i].historyIndex > cancelled.historyIndex) {
+          tracked.turnQueue[i].historyIndex--;
+        }
+      }
+    }
+
+    tracked.turnQueue.splice(queueIndex, 1);
+    logSessionEvent(tracked, 'turn.cancelled', { turnId: targetTurnId, wasActive: false });
+    broadcastQueueState(tracked);
+  }
+  // Not found — stale cancel, no-op
 }
 
 // ── Helper: create waitForToolResults for a tracked session (turn-scoped) ──
@@ -976,6 +1068,12 @@ async function handleTurnStreaming(
       sendToClient(tracked.clientWs, { type: 'toolCall', functionCalls: fcs, turnId });
     }
     logSessionEvent(tracked, 'toolCall', { functionCalls: fcs, turnId });
+
+    // Update active turn status to executing-tools
+    if (tracked.activeTurn?.turnId === turnId) {
+      tracked.activeTurn.status = 'executing-tools';
+      broadcastQueueState(tracked);
+    }
 
     // Wait for tool results from client
     const results = await waitForToolResults(tracked, fcs.length, turnId);
