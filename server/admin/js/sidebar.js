@@ -65,35 +65,56 @@ export function renderSidebar() {
   sessionList.insertBefore(fragment, noSessions);
 }
 
+function updateTabDisabledState() {
+  const { tabBar } = getDomRefs();
+  const hasSession = !!state.selectedSessionId;
+  tabBar.querySelectorAll('.tab-btn').forEach(btn => {
+    const tab = btn.dataset.tab;
+    if (tab === 'events' || tab === 'analysis') {
+      btn.classList.toggle('disabled', !hasSession);
+    }
+  });
+}
+
 export function selectSession(id) {
-  const { tabBar, eventStream, analysisPanel } = getDomRefs();
+  const { eventStream, analysisPanel, analyticsPanel } = getDomRefs();
   state.selectedSessionId = id;
   state.selectedScanIndex = -1;
   renderSidebar();
   renderSessionHeader();
-  tabBar.style.display = id ? '' : 'none';
+  updateTabDisabledState();
+
+  // If on a session-dependent tab, show it; if on analytics, stay there
+  if (state.activeTab === 'analytics') {
+    eventStream.style.display = 'none';
+    analysisPanel.classList.remove('visible');
+    analyticsPanel.classList.add('visible');
+    return;
+  }
+
   if (state.activeTab === 'events') {
     eventStream.style.display = '';
     analysisPanel.classList.remove('visible');
+    analyticsPanel.classList.remove('visible');
     renderers.renderEvents();
   } else {
     eventStream.style.display = 'none';
     analysisPanel.classList.add('visible');
+    analyticsPanel.classList.remove('visible');
     renderers.renderAnalysis();
   }
 }
 
 export function renderSessionHeader() {
-  const { selectedSessionInfo, selectedSessionMeta, tabBar } = getDomRefs();
+  const { selectedSessionInfo, selectedSessionMeta } = getDomRefs();
+  updateTabDisabledState();
   if (!state.selectedSessionId || !state.sessions.has(state.selectedSessionId)) {
     selectedSessionInfo.textContent = 'Select a session to view events';
     selectedSessionMeta.textContent = '';
-    tabBar.style.display = 'none';
     return;
   }
   const s = state.sessions.get(state.selectedSessionId).meta;
   const status = s.disconnected ? ' (disconnected)' : ' (live)';
   selectedSessionInfo.textContent = s.id.substring(0, 8) + '...' + status;
   selectedSessionMeta.textContent = escapeHtml(s.pageUrl || '');
-  tabBar.style.display = '';
 }

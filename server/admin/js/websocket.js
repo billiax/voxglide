@@ -2,6 +2,19 @@ import { state, getDomRefs, renderers } from './state.js';
 import { renderSidebar, selectSession, renderSessionHeader } from './sidebar.js';
 import { appendEvent } from './events.js';
 
+let analyticsDebounceTimer = null;
+
+function scheduleAnalyticsUpdate() {
+  if (state.activeTab !== 'analytics') return;
+  if (analyticsDebounceTimer) return;
+  analyticsDebounceTimer = setTimeout(() => {
+    analyticsDebounceTimer = null;
+    if (state.activeTab === 'analytics' && renderers.renderAnalytics) {
+      renderers.renderAnalytics();
+    }
+  }, 500);
+}
+
 export function connect() {
   const { statusDot, statusText } = getDomRefs();
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -43,6 +56,7 @@ function handleMessage(msg) {
         }
       }
       renderSidebar();
+      scheduleAnalyticsUpdate();
       break;
 
     case 'session.new':
@@ -52,6 +66,7 @@ function handleMessage(msg) {
       if (!state.selectedSessionId) {
         selectSession(msg.session.id);
       }
+      scheduleAnalyticsUpdate();
       break;
 
     case 'session.update':
@@ -83,6 +98,7 @@ function handleMessage(msg) {
           renderers.renderAnalysis();
         }
       }
+      scheduleAnalyticsUpdate();
       break;
     }
 
@@ -94,6 +110,7 @@ function handleMessage(msg) {
           renderSessionHeader();
         }
       }
+      scheduleAnalyticsUpdate();
       break;
 
     case 'session.queue': {

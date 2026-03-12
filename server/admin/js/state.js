@@ -4,7 +4,7 @@ export const state = {
   selectedSessionId: null,
   ws: null,
   autoScroll: true,
-  activeTab: 'events', // 'events' | 'analysis'
+  activeTab: 'events', // 'events' | 'analysis' | 'analytics'
   selectedScanIndex: -1, // -1 = latest
   theme: 'auto', // 'dark' | 'light' | 'auto'
   eventFilters: { user: true, ai: true, tools: true, scans: true, system: true },
@@ -31,6 +31,7 @@ export function getDomRefs() {
       selectedSessionMeta: document.getElementById('selectedSessionMeta'),
       tabBar: document.getElementById('tabBar'),
       analysisPanel: document.getElementById('analysisPanel'),
+      analyticsPanel: document.getElementById('analyticsPanel'),
     };
   }
   return domRefs;

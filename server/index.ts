@@ -1067,6 +1067,11 @@ async function handleTurnStreaming(
         outputTokens: lastUsage.outputTokens || 0,
       });
     }
+    logSessionEvent(tracked, 'usage', {
+      totalTokens: lastUsage.totalTokens || 0,
+      inputTokens: lastUsage.promptTokens || 0,
+      outputTokens: lastUsage.outputTokens || 0,
+    });
   }
 
   if (functionCalls.length > 0) {
@@ -1113,7 +1118,7 @@ async function handleTurnStreaming(
     // Send final response (backward compatible — old clients see type:'response')
     if (accumulatedText && tracked.clientWs) {
       sendToClient(tracked.clientWs, { type: 'response', text: accumulatedText });
-      logSessionEvent(tracked, 'response', { text: accumulatedText });
+      logSessionEvent(tracked, 'response', { text: accumulatedText, turnId });
     }
   }
 }

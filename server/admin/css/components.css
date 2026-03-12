@@ -208,3 +208,8 @@
   border-color: var(--accent-blue);
 }
 .tab-btn.active + .tab-btn { border-left-color: var(--accent-blue); }
+.tab-btn.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+  cursor: default;
+}

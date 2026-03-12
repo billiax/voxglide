@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/admin/css/components.css">
 <link rel="stylesheet" href="/admin/css/events.css">
 <link rel="stylesheet" href="/admin/css/analysis.css">
+<link rel="stylesheet" href="/admin/css/analytics.css">
 </head>
 <body>
 
@@ -34,9 +35,10 @@
     <div class="main-header" id="mainHeader">
       <div style="display:flex;align-items:center;gap:12px">
         <span class="session-info" id="selectedSessionInfo">Select a session to view events</span>
-        <div class="tab-bar" id="tabBar" style="display:none">
+        <div class="tab-bar" id="tabBar">
           <button class="tab-btn active" data-tab="events">Events</button>
           <button class="tab-btn" data-tab="analysis">Page Analysis</button>
+          <button class="tab-btn" data-tab="analytics">Analytics</button>
         </div>
       </div>
       <span id="selectedSessionMeta"></span>
@@ -47,6 +49,7 @@
     <div class="analysis-panel" id="analysisPanel">
       <div class="analysis-empty" id="analysisEmpty">No scan data yet</div>
     </div>
+    <div class="analytics-panel" id="analyticsPanel"></div>
   </div>
 </div>
 
