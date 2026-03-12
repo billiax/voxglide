@@ -1,4 +1,5 @@
 import type { UIConfig, TranscriptEvent } from '../types';
+import type { QueueState } from '../ai/types';
 import type { ConnectionStateValue } from '../constants';
 import { ConnectionState, DEFAULT_UI } from '../constants';
 import { SDK_STYLES } from './styles';
@@ -239,6 +240,22 @@ export class UIManager {
   restoreTranscript(): void {
     if (this.destroyed) return;
     this.transcript?.restoreTranscript();
+  }
+
+  /**
+   * Update the queue panel display.
+   */
+  updateQueue(queue: QueueState): void {
+    if (this.destroyed) return;
+    this.transcript?.updateQueue(queue);
+  }
+
+  /**
+   * Set a handler for cancel buttons in the queue panel.
+   */
+  setCancelHandler(handler: (turnId: string) => void): void {
+    if (this.destroyed) return;
+    this.transcript?.setCancelHandler(handler);
   }
 
   /**

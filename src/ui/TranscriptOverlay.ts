@@ -1,4 +1,5 @@
 import type { TranscriptEvent } from '../types';
+import type { QueueState } from '../ai/types';
 import type { InputMode } from './FloatingButton';
 import { TranscriptStore } from './TranscriptStore';
 import type { StoredTranscriptLine } from './TranscriptStore';
@@ -14,10 +15,12 @@ export class TranscriptOverlay {
   private inputRow: HTMLElement | null = null;
   private onSendText: ((text: string) => void) | null = null;
   private onDisconnect: (() => void) | null = null;
+  private onCancelTurn: ((turnId: string) => void) | null = null;
   private inputMode: InputMode;
   private toolStatusEl: HTMLElement | null = null;
   private thinkingEl: HTMLElement | null = null;
   private headerEl: HTMLElement | null = null;
+  private queuePanel: HTMLElement | null = null;
 
   constructor(parent: HTMLElement, autoHideMs: number, inputMode: InputMode = 'voice') {
     this.autoHideMs = autoHideMs;
@@ -220,6 +223,85 @@ export class TranscriptOverlay {
     }
   }
 
+  setCancelHandler(handler: (turnId: string) => void): void {
+    this.onCancelTurn = handler;
+  }
+
+  updateQueue(queue: QueueState): void {
+    const hasItems = queue.active !== null || queue.queued.length > 0;
+
+    if (!hasItems) {
+      // Hide queue panel when empty
+      if (this.queuePanel) {
+        this.queuePanel.remove();
+        this.queuePanel = null;
+      }
+      return;
+    }
+
+    // Replace thinking indicator — queue panel serves that purpose now
+    if (queue.active) {
+      this.removeThinkingIndicator();
+    }
+
+    // Create or reuse queue panel
+    if (!this.queuePanel) {
+      this.queuePanel = document.createElement('div');
+      this.queuePanel.className = 'vsdk-queue-panel';
+    }
+
+    // Rebuild contents
+    this.queuePanel.innerHTML = '';
+
+    // Active turn
+    if (queue.active) {
+      this.queuePanel.appendChild(this.createQueueItem(queue.active));
+    }
+
+    // Queued turns
+    for (const item of queue.queued) {
+      this.queuePanel.appendChild(this.createQueueItem(item));
+    }
+
+    // Insert before input row
+    if (!this.queuePanel.parentElement) {
+      this.container.insertBefore(this.queuePanel, this.inputRow);
+    }
+    this.container.scrollTop = this.container.scrollHeight;
+  }
+
+  clearQueue(): void {
+    if (this.queuePanel) {
+      this.queuePanel.remove();
+      this.queuePanel = null;
+    }
+  }
+
+  private createQueueItem(item: { turnId: string; text: string; status: string }): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'vsdk-queue-item';
+
+    const dot = document.createElement('span');
+    dot.className = `vsdk-queue-dot ${item.status}`;
+
+    const text = document.createElement('span');
+    text.className = 'vsdk-queue-item-text';
+    text.textContent = item.text.length > 50 ? item.text.slice(0, 50) + '...' : item.text;
+
+    const cancel = document.createElement('button');
+    cancel.className = 'vsdk-queue-cancel';
+    cancel.textContent = '\u00d7';
+    cancel.setAttribute('aria-label', 'Cancel');
+    cancel.addEventListener('click', () => {
+      this.onCancelTurn?.(item.turnId);
+    });
+
+    el.appendChild(dot);
+    el.appendChild(text);
+    el.appendChild(cancel);
+    return el;
+  }
+
   show(): void {
     this.container.classList.add('visible');
     if (this.inputMode !== 'text') {
@@ -241,6 +323,7 @@ export class TranscriptOverlay {
     this.storedLines = [];
     this.removeToolStatus();
     this.removeThinkingIndicator();
+    this.clearQueue();
     TranscriptStore.clear();
     this.hide();
   }
@@ -325,6 +408,7 @@ export class TranscriptOverlay {
   destroy(): void {
     this.clearAutoHideTimer();
     this.removeThinkingIndicator();
+    this.clearQueue();
     this.container.remove();
   }
 }
