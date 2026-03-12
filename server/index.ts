@@ -2,23 +2,16 @@ import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { GoogleGenAI } from '@google/genai';
-import type { Content, Tool, GenerateContentConfig } from '@google/genai';
 import crypto from 'crypto';
+import { createProvider } from './providers/factory.js';
+import type { InternalContent, InternalTool, LLMProvider } from './providers/types.js';
 
 // ── Config ──
 
 const PORT = parseInt(process.env.PORT || '3100', 10);
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '*').split(',').map(s => s.trim());
 
-if (!GEMINI_API_KEY) {
-  console.error('[voxglide] GEMINI_API_KEY environment variable is required');
-  process.exit(1);
-}
-
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+const provider: LLMProvider = createProvider();
 
 // ── Constants ──
 
@@ -27,8 +20,7 @@ const KEEP_RECENT_TURNS = 6;
 const SESSION_CLEANUP_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_TOOL_DEPTH = 10;
 const MAX_HISTORY_ENTRIES = 200;
-const GEMINI_CACHE_MIN_TOKENS = 32_768;
-const GEMINI_CACHE_TTL = '600s'; // 10 min
+const CACHE_TTL = '600s'; // 10 min
 
 // ── Types ──
 
@@ -39,9 +31,9 @@ interface SessionEvent {
 }
 
 interface Session {
-  history: Content[];
+  history: InternalContent[];
   systemInstruction: string;
-  tools: Tool[];
+  tools: InternalTool[];
   lastPromptTokenCount: number;
   lastOutputTokenCount: number;
   conversationSummary: string | null;
@@ -168,11 +160,11 @@ function rejectAllPendingToolResults(tracked: TrackedSession, reason: string): v
 
 // ── History Management ──
 
-function estimateTokens(history: Content[]): number {
+function estimateTokens(history: InternalContent[]): number {
   let chars = 0;
   for (const entry of history) {
     for (const part of entry.parts || []) {
-      if ((part as any).text) chars += (part as any).text.length;
+      if (part.text) chars += part.text.length;
       else chars += JSON.stringify(part).length;
     }
   }
@@ -197,26 +189,20 @@ async function maybeSummarizeHistory(session: Session, tracked: TrackedSession):
 
   try {
     // Generate summary using a non-streaming call
-    const summaryPrompt = `Summarize the following conversation concisely, preserving key facts, user preferences, and any pending context:\n\n${oldHistory.map(h => `${h.role}: ${(h.parts || []).map((p: any) => p.text || JSON.stringify(p)).join(' ')}`).join('\n')}`;
+    const summaryPrompt = `Summarize the following conversation concisely, preserving key facts, user preferences, and any pending context:\n\n${oldHistory.map(h => `${h.role}: ${(h.parts || []).map(p => p.text || JSON.stringify(p)).join(' ')}`).join('\n')}`;
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+    const response = await provider.generateContent({
       contents: [{ role: 'user', parts: [{ text: summaryPrompt }] }],
-      config: {
-        systemInstruction: 'You are a conversation summarizer. Produce a concise summary that preserves all important context.',
-      },
+      systemInstruction: 'You are a conversation summarizer. Produce a concise summary that preserves all important context.',
     });
 
-    const summaryText = response.candidates?.[0]?.content?.parts
-      ?.filter((p: any) => p.text)
-      .map((p: any) => p.text)
-      .join('') || '';
+    const summaryText = response.text || '';
 
     if (summaryText) {
       session.conversationSummary = summaryText;
 
-      const summaryEntry: Content = { role: 'user', parts: [{ text: `[Previous conversation summary]: ${summaryText}` }] };
-      const ackEntry: Content = { role: 'model', parts: [{ text: 'Understood, I have the context from our previous conversation.' }] };
+      const summaryEntry: InternalContent = { role: 'user', parts: [{ text: `[Previous conversation summary]: ${summaryText}` }] };
+      const ackEntry: InternalContent = { role: 'model', parts: [{ text: 'Understood, I have the context from our previous conversation.' }] };
 
       session.history.length = 0;
       session.history.push(summaryEntry, ackEntry, ...recentHistory);
@@ -240,25 +226,27 @@ async function maybeSummarizeHistory(session: Session, tracked: TrackedSession):
   }
 }
 
-// ── Gemini Context Caching ──
+// ── Context Caching (provider-dependent) ──
 
-function hashForCaching(systemInstruction: string, tools: Tool[]): string {
+function hashForCaching(systemInstruction: string, tools: InternalTool[]): string {
   const payload = systemInstruction + JSON.stringify(tools);
   return crypto.createHash('md5').update(payload).digest('hex');
 }
 
-function estimateInstructionTokens(systemInstruction: string, tools: Tool[], history: Content[]): number {
+function estimateInstructionTokens(systemInstruction: string, tools: InternalTool[], history: InternalContent[]): number {
   let chars = systemInstruction.length + JSON.stringify(tools).length;
   for (const entry of history) {
     for (const part of entry.parts || []) {
-      if ((part as any).text) chars += (part as any).text.length;
+      if (part.text) chars += part.text.length;
       else chars += JSON.stringify(part).length;
     }
   }
   return Math.ceil(chars / 4);
 }
 
-async function createOrUpdateGeminiCache(session: Session, tracked: TrackedSession): Promise<void> {
+async function createOrUpdateProviderCache(session: Session, tracked: TrackedSession): Promise<void> {
+  if (!provider.supportsCaching || !provider.createCache) return;
+
   const hash = hashForCaching(session.systemInstruction, session.tools);
 
   // Cache already matches — nothing to do
@@ -268,28 +256,25 @@ async function createOrUpdateGeminiCache(session: Session, tracked: TrackedSessi
     session.systemInstruction, session.tools, session.history,
   );
 
-  if (estimatedTokens < GEMINI_CACHE_MIN_TOKENS) {
+  if (estimatedTokens < provider.cacheMinTokens) {
     session.cacheEligible = false;
     // Clean up stale cache if we dropped below threshold (e.g. context got smaller)
     if (session.cachedContentName) {
-      await cleanupGeminiCache(session);
+      await cleanupProviderCache(session);
     }
     return;
   }
 
   // Clean up old cache before creating new one
   if (session.cachedContentName) {
-    await cleanupGeminiCache(session);
+    await cleanupProviderCache(session);
   }
 
   try {
-    const cache = await ai.caches.create({
-      model: GEMINI_MODEL,
-      config: {
-        systemInstruction: session.systemInstruction,
-        tools: session.tools,
-        ttl: GEMINI_CACHE_TTL,
-      },
+    const cache = await provider.createCache({
+      systemInstruction: session.systemInstruction,
+      tools: session.tools,
+      ttl: CACHE_TTL,
     });
 
     session.cachedContentName = cache.name || null;
@@ -309,15 +294,17 @@ async function createOrUpdateGeminiCache(session: Session, tracked: TrackedSessi
   }
 }
 
-async function cleanupGeminiCache(session: Session): Promise<void> {
+async function cleanupProviderCache(session: Session): Promise<void> {
   if (!session.cachedContentName) return;
   const name = session.cachedContentName;
   session.cachedContentName = null;
   session.cachedContentHash = null;
-  try {
-    await ai.caches.delete({ name });
-  } catch {
-    // Fire-and-forget: cache may already be expired
+  if (provider.deleteCache) {
+    try {
+      await provider.deleteCache(name);
+    } catch {
+      // Fire-and-forget: cache may already be expired
+    }
   }
 }
 
@@ -782,7 +769,7 @@ function handleContextUpdate(tracked: TrackedSession, msg: any): void {
 
 function handleSessionStop(tracked: TrackedSession): void {
   if (tracked.session) {
-    cleanupGeminiCache(tracked.session);
+    cleanupProviderCache(tracked.session);
   }
   tracked.session = null;
   logSessionEvent(tracked, 'session.stop', {});
@@ -812,7 +799,7 @@ function handleWsClose(clientWs: WebSocket): void {
   // Clean up after 30 minutes if not reconnected
   tracked.cleanupTimer = setTimeout(() => {
     if (tracked.session) {
-      cleanupGeminiCache(tracked.session);
+      cleanupProviderCache(tracked.session);
     }
     trackedSessions.delete(tracked.id);
     wsToSessionId.delete(clientWs); // safety cleanup
@@ -975,7 +962,7 @@ function waitForToolResults(tracked: TrackedSession, expectedCount: number, turn
   });
 }
 
-// ── Streaming Gemini turn handling ──
+// ── Streaming LLM turn handling ──
 
 async function handleTurnStreaming(
   tracked: TrackedSession,
@@ -994,26 +981,16 @@ async function handleTurnStreaming(
   const session = tracked.session;
   if (!session) return;
 
-  // Attempt Gemini context caching for large contexts
-  await createOrUpdateGeminiCache(session, tracked);
+  // Attempt context caching for large contexts (provider-dependent)
+  await createOrUpdateProviderCache(session, tracked);
 
-  let config: GenerateContentConfig;
-  if (session.cachedContentName) {
-    // Use cached content — do NOT pass systemInstruction/tools (they're in the cache)
-    config = { cachedContent: session.cachedContentName };
-  } else {
-    config = {
-      systemInstruction: session.systemInstruction,
-      tools: session.tools,
-    };
-  }
-
-  let stream;
+  let stream: AsyncIterable<import('./providers/types.js').StreamChunk>;
   try {
-    stream = await ai.models.generateContentStream({
-      model: GEMINI_MODEL,
+    stream = await provider.generateContentStream({
       contents: session.history,
-      config,
+      systemInstruction: session.cachedContentName ? undefined : session.systemInstruction,
+      tools: session.cachedContentName ? undefined : session.tools,
+      cachedContent: session.cachedContentName || undefined,
     });
   } catch (err: any) {
     // If cache reference failed (expired/deleted), retry without cache
@@ -1022,14 +999,10 @@ async function handleTurnStreaming(
       session.cachedContentName = null;
       session.cachedContentHash = null;
       session.cacheEligible = false;
-      config = {
+      stream = await provider.generateContentStream({
+        contents: session.history,
         systemInstruction: session.systemInstruction,
         tools: session.tools,
-      };
-      stream = await ai.models.generateContentStream({
-        model: GEMINI_MODEL,
-        contents: session.history,
-        config,
       });
     } else {
       throw err;
@@ -1037,9 +1010,9 @@ async function handleTurnStreaming(
   }
 
   let accumulatedText = '';
-  const functionCalls: any[] = [];
+  const functionCalls: Array<{ id?: string; name: string; args: Record<string, unknown> }> = [];
   const allParts: any[] = [];
-  let usageMetadata: any = null;
+  let lastUsage: import('./providers/types.js').TokenUsage | null = null;
 
   try {
     for await (const chunk of stream) {
@@ -1059,16 +1032,18 @@ async function handleTurnStreaming(
         return;
       }
 
-      if (chunk.usageMetadata) usageMetadata = chunk.usageMetadata;
+      if (chunk.usage) lastUsage = chunk.usage;
 
-      for (const part of chunk.candidates?.[0]?.content?.parts || []) {
-        allParts.push(part);
-        if (part.text) {
-          accumulatedText += part.text;
-          sendToClient(tracked.clientWs, { type: 'response.delta', text: part.text });
-        }
-        if (part.functionCall) {
-          functionCalls.push(part);
+      if (chunk.textDelta) {
+        allParts.push({ text: chunk.textDelta });
+        accumulatedText += chunk.textDelta;
+        sendToClient(tracked.clientWs, { type: 'response.delta', text: chunk.textDelta });
+      }
+
+      if (chunk.functionCalls) {
+        for (const fc of chunk.functionCalls) {
+          allParts.push({ functionCall: { name: fc.name, args: fc.args } });
+          functionCalls.push(fc);
         }
       }
     }
@@ -1081,15 +1056,15 @@ async function handleTurnStreaming(
   }
 
   // Send usage — always use tracked.clientWs for current reference
-  if (usageMetadata && tracked.session) {
-    tracked.session.lastPromptTokenCount = usageMetadata.promptTokenCount || 0;
-    tracked.session.lastOutputTokenCount = usageMetadata.candidatesTokenCount || 0;
+  if (lastUsage && tracked.session) {
+    tracked.session.lastPromptTokenCount = lastUsage.promptTokens || 0;
+    tracked.session.lastOutputTokenCount = lastUsage.outputTokens || 0;
     if (tracked.clientWs) {
       sendToClient(tracked.clientWs, {
         type: 'usage',
-        totalTokens: usageMetadata.totalTokenCount || 0,
-        inputTokens: usageMetadata.promptTokenCount || 0,
-        outputTokens: usageMetadata.candidatesTokenCount || 0,
+        totalTokens: lastUsage.totalTokens || 0,
+        inputTokens: lastUsage.promptTokens || 0,
+        outputTokens: lastUsage.outputTokens || 0,
       });
     }
   }
@@ -1098,10 +1073,10 @@ async function handleTurnStreaming(
     tracked.session?.history.push({ role: 'model', parts: allParts });
 
     // Send tool calls to client and wait for results
-    const fcs = functionCalls.map((p: any) => ({
-      id: crypto.randomUUID(),
-      name: p.functionCall.name,
-      args: p.functionCall.args || {},
+    const fcs = functionCalls.map(fc => ({
+      id: fc.id || crypto.randomUUID(),
+      name: fc.name,
+      args: fc.args || {},
     }));
 
     if (tracked.clientWs) {
@@ -1169,6 +1144,6 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`[voxglide] Listening on ws://0.0.0.0:${PORT}`);
   console.log(`[voxglide] SDK: http://0.0.0.0:${PORT}/sdk/voice-sdk.iife.js`);
   console.log(`[voxglide] Admin: http://0.0.0.0:${PORT}/admin`);
-  console.log(`[voxglide] Model: ${GEMINI_MODEL}`);
+  console.log(`[voxglide] Provider: ${provider.name} (${provider.model})`);
   console.log(`[voxglide] Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
 });

@@ -8,7 +8,9 @@
     "start": "tsx index.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
     "@google/genai": "^0.14.0",
+    "openai": "^4.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
