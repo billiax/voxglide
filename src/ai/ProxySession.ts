@@ -33,6 +33,7 @@ export class ProxySession {
 
   // Pending context update during speech debounce
   private pendingContextUpdate: string | null = null;
+  private pendingContextTools: unknown[] | undefined = undefined;
 
   /** The server-assigned session ID, available after connection. */
   public sessionId: string | null = null;
@@ -325,9 +326,13 @@ export class ProxySession {
   private flushPendingContextUpdate(): void {
     if (this.pendingContextUpdate !== null) {
       const context = this.pendingContextUpdate;
+      const tools = this.pendingContextTools;
       this.pendingContextUpdate = null;
+      this.pendingContextTools = undefined;
       this.debug({ direction: 'send', kind: 'context.update', payload: { length: context.length, deferred: true } });
-      this.send({ type: 'context.update', context });
+      const payload: Record<string, unknown> = { type: 'context.update', context };
+      if (tools) payload.tools = tools;
+      this.send(payload);
     }
   }
 
@@ -434,16 +439,20 @@ export class ProxySession {
   /**
    * Send a context update to the server mid-session.
    * If speech debounce is pending, defers the update to avoid interleaving.
+   * Optional tools param sends updated tool declarations alongside context.
    */
-  sendContextUpdate(context: string): void {
+  sendContextUpdate(context: string, tools?: unknown[]): void {
     // If speech debounce is in progress, defer context update
     if (this.speechDebounceTimer !== null) {
       this.pendingContextUpdate = context;
+      this.pendingContextTools = tools;
       this.debug({ direction: 'send', kind: 'context.update', payload: { length: context.length, deferred: true } });
       return;
     }
     this.debug({ direction: 'send', kind: 'context.update', payload: { length: context.length } });
-    this.send({ type: 'context.update', context });
+    const payload: Record<string, unknown> = { type: 'context.update', context };
+    if (tools) payload.tools = tools;
+    this.send(payload);
   }
 
   /**

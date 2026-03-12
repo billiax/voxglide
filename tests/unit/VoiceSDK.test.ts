@@ -94,6 +94,25 @@ vi.mock('../../src/actions/DOMActions', () => ({
   setPostClickCallback: vi.fn(),
 }));
 
+const { mockNbtSync, mockNbtDestroy, mockNbtGetActions, mockNbtGetToolDeclarations } = vi.hoisted(() => ({
+  mockNbtSync: vi.fn().mockReturnValue(false),
+  mockNbtDestroy: vi.fn(),
+  mockNbtGetActions: vi.fn().mockReturnValue({}),
+  mockNbtGetToolDeclarations: vi.fn().mockReturnValue([]),
+}));
+
+vi.mock('../../src/actions/NbtFunctionsProvider', () => {
+  class MockNbtFunctionsProvider {
+    sync = mockNbtSync;
+    destroy = mockNbtDestroy;
+    getActions = mockNbtGetActions;
+    getToolDeclarations = mockNbtGetToolDeclarations;
+    getRegisteredNames = vi.fn().mockReturnValue(new Set());
+    constructor(public onChange: any, public debug: any) {}
+  }
+  return { NbtFunctionsProvider: MockNbtFunctionsProvider };
+});
+
 import { ContextEngine } from '../../src/context/ContextEngine';
 import { TextProvider } from '../../src/context/TextProvider';
 
@@ -545,6 +564,60 @@ describe('VoiceSDK', () => {
       // Should have called cancelTurn on the session
       const session = proxySessionInstances[0];
       expect((session as any).callbacks).toBeDefined();
+    });
+  });
+
+  describe('nbt_functions integration', () => {
+    it('creates NbtFunctionsProvider by default', () => {
+      expect((sdk as any).nbtFunctionsProvider).not.toBeNull();
+    });
+
+    it('does NOT create NbtFunctionsProvider when nbtFunctions: false', () => {
+      const s = new VoiceSDK({ ...defaultConfig, nbtFunctions: false });
+      expect((s as any).nbtFunctionsProvider).toBeNull();
+      s.destroy();
+    });
+
+    it('registers initial nbt_functions with ActionRouter', () => {
+      mockNbtGetActions.mockReturnValueOnce({
+        myFunc: {
+          declaration: { name: 'myFunc', description: 'test', parameters: { type: 'OBJECT', properties: {} } },
+          handler: vi.fn(),
+        },
+      });
+      const s = new VoiceSDK({ ...defaultConfig });
+      const router = (s as any).actionRouter;
+      // The handler should have been registered via registerCustomActions
+      expect(router.handlers.has('myFunc')).toBe(true);
+      s.destroy();
+    });
+
+    it('does not call registerCustomActions when no initial nbt_functions', () => {
+      mockNbtGetActions.mockReturnValueOnce({});
+      const s = new VoiceSDK({ ...defaultConfig });
+      // Just verify it doesn't throw — no actions to register
+      expect((s as any).nbtFunctionsProvider).not.toBeNull();
+      s.destroy();
+    });
+
+    it('includes nbt_functions in buildToolDeclarations output', () => {
+      const nbtTool = { name: 'nbtTool', description: 'nbt', parameters: { type: 'OBJECT', properties: {} } };
+      mockNbtGetToolDeclarations.mockReturnValueOnce([nbtTool]);
+      const s = new VoiceSDK({ ...defaultConfig });
+      const tools = (s as any).buildToolDeclarations([]);
+      expect(tools.some((t: any) => t.name === 'nbtTool')).toBe(true);
+      s.destroy();
+    });
+
+    it('destroys provider on destroy()', async () => {
+      await sdk.destroy();
+      expect(mockNbtDestroy).toHaveBeenCalled();
+    });
+
+    it('syncs nbt_functions on SPA navigation', () => {
+      const navObserver = (sdk as any).navigationObserver;
+      navObserver.onNavigate({ from: '/a', to: '/b', type: 'pushState' });
+      expect(mockNbtSync).toHaveBeenCalled();
     });
   });
 
