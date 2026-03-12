@@ -326,6 +326,7 @@ async function cleanupGeminiCache(session: Session): Promise<void> {
 // Static file serving for SDK dist
 const distDir = path.resolve(import.meta.dirname || __dirname, '..', 'dist');
 const adminDir = path.resolve(import.meta.dirname || __dirname, 'admin');
+const examplesDir = path.resolve(import.meta.dirname || __dirname, '..', 'examples');
 
 const MIME_TYPES: Record<string, string> = {
   '.js': 'application/javascript',
@@ -376,6 +377,40 @@ const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => 
     try {
       const content = fs.readFileSync(filePath);
       res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] });
+      res.end(content);
+    } catch {
+      res.writeHead(404);
+      res.end();
+    }
+    return;
+  }
+
+  // Serve nbt_functions files from /sdk/functions/
+  if (req.url?.startsWith('/sdk/functions/')) {
+    const subPath = req.url.slice('/sdk/functions/'.length);
+    const filePath = path.join(examplesDir, subPath);
+
+    // Prevent directory traversal
+    if (!filePath.startsWith(examplesDir)) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+
+    const ext = path.extname(filePath);
+    const contentType = ext === '.json' ? 'application/json' : MIME_TYPES[ext];
+    if (!contentType) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+
+    try {
+      const content = fs.readFileSync(filePath);
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      });
       res.end(content);
     } catch {
       res.writeHead(404);
@@ -731,6 +766,11 @@ function handleContextUpdate(tracked: TrackedSession, msg: any): void {
   if (newContext) {
     tracked.session.systemInstruction = newContext;
     // Invalidate cache — will be recreated on next turn if eligible
+    tracked.session.cachedContentHash = null;
+  }
+  if (msg.tools) {
+    tracked.session.tools = msg.tools;
+    // Invalidate cache since tools changed
     tracked.session.cachedContentHash = null;
   }
   logSessionEvent(tracked, 'context.update', {
