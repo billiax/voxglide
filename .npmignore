@@ -1,0 +1,16 @@
+src/
+tests/
+server/
+extension/
+examples/
+.claude/
+.github/
+*.config.*
+rollup.config.mjs
+tsconfig.json
+vitest.config.ts
+eslint.config.mjs
+start-dev.sh
+CLAUDE.md
+.gitignore
+.npmignore

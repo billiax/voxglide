@@ -1,0 +1,55 @@
+{
+  "name": "@voxglide/react",
+  "version": "0.1.0",
+  "description": "React hooks and components for VoxGlide voice AI SDK",
+  "author": "Billiax",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/billiax/voxglide.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/billiax/voxglide",
+  "bugs": {
+    "url": "https://github.com/billiax/voxglide/issues"
+  },
+  "keywords": [
+    "voxglide",
+    "voice",
+    "ai",
+    "react",
+    "hooks",
+    "speech-recognition"
+  ],
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "voxglide": ">=0.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.6.0",
+    "voxglide": "file:../../"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  }
+}
