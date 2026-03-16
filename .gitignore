@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+
+# Keys and certificates
+*.pem
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Alternative lock files (npm is canonical)
+yarn.lock
+pnpm-lock.yaml
+
+# Claude Code
+.claude/worktrees/
+
+# Misc
+.mcp.json
+.playwright-mcp/
+temp/

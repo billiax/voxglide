@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice SDK - Basic Example</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    p { color: #666; margin-bottom: 24px; }
+    .log { background: #f3f4f6; border-radius: 8px; padding: 16px; font-family: monospace; font-size: 13px; max-height: 300px; overflow-y: auto; }
+    .log-entry { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Voice SDK - Basic Example</h1>
+  <p>Click the mic button in the bottom-right corner to start. Try saying "What is on this page?"</p>
+
+  <h2>Sample Content</h2>
+  <p>This is a simple demo page for the Voice SDK. The assistant can read this content and answer questions about it.</p>
+
+  <h3>Event Log</h3>
+  <div class="log" id="log"></div>
+
+  <script src="../dist/voice-sdk.iife.js"></script>
+  <script>
+    const log = document.getElementById('log');
+    function addLog(msg) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    const voice = new VoiceSDK({
+      serverUrl: 'ws://localhost:3100',
+      autoContext: true,
+      tts: true,
+      context: 'This is a basic demo page for testing the Voice SDK.',
+    });
+
+    voice.on('connected', () => addLog('Connected'));
+    voice.on('disconnected', () => addLog('Disconnected'));
+    voice.on('transcript', (e) => addLog(`${e.speaker}: ${e.text}`));
+    voice.on('action', (e) => addLog(`Action: ${e.name}(${JSON.stringify(e.args)})`));
+    voice.on('error', (e) => addLog(`Error: ${e.message}`));
+    voice.on('stateChange', (e) => addLog(`State: ${e.from} → ${e.to}`));
+  </script>
+</body>
+</html>

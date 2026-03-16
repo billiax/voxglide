@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg-primary: #0c0f14;
+      --bg-secondary: #12161e;
+      --bg-tertiary: #1a1f2b;
+      --bg-hover: #1e2433;
+      --text-primary: #e8ecf1;
+      --text-secondary: #b8c0cc;
+      --text-muted: #6b7585;
+      --text-faint: #3d4554;
+      --border-primary: rgba(255,255,255,0.06);
+      --border-secondary: rgba(255,255,255,0.04);
+      --accent-blue: #5b9cf5;
+      --accent-green: #4ade80;
+      --accent-red: #f87171;
+      --scrollbar-thumb: rgba(255,255,255,0.08);
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg-primary: #f8f9fb;
+        --bg-secondary: #ffffff;
+        --bg-tertiary: #f0f2f5;
+        --bg-hover: #e8ecf1;
+        --text-primary: #111827;
+        --text-secondary: #374151;
+        --text-muted: #6b7280;
+        --text-faint: #9ca3af;
+        --border-primary: rgba(0,0,0,0.08);
+        --border-secondary: rgba(0,0,0,0.04);
+        --accent-blue: #3b82f6;
+        --accent-green: #22c55e;
+        --accent-red: #ef4444;
+        --scrollbar-thumb: rgba(0,0,0,0.1);
+      }
+    }
+
+    body {
+      width: 360px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-secondary);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+
+    /* ── Header ── */
+    .header {
+      padding: 10px 16px 8px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-primary);
+      position: relative;
+    }
+    .header::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, var(--accent-blue), #c084fc, #67d4e8);
+      opacity: 0.3;
+    }
+    .header h1 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+    .header h1 span { color: var(--accent-blue); }
+    .header-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* ── Content ── */
+    .content {
+      padding: 10px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* ── Form groups ── */
+    .form-group {}
+    .form-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-bottom: 4px;
+    }
+
+    input[type="text"], textarea {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid var(--border-primary);
+      border-radius: 8px;
+      font-size: 12px;
+      font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    input[type="text"]::placeholder, textarea::placeholder {
+      color: var(--text-faint);
+    }
+    input[type="text"]:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 3px rgba(91,156,245,0.1);
+    }
+    textarea {
+      resize: vertical;
+      min-height: 40px;
+      line-height: 1.5;
+    }
+
+    /* ── Options row ── */
+    .options {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .option-pill {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+      padding: 4px 10px;
+      border: 1px solid var(--border-primary);
+      border-radius: 16px;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.12s;
+      background: transparent;
+    }
+    .option-pill:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+    .option-pill.active {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border-color: rgba(91,156,245,0.25);
+    }
+    .option-pill input[type="checkbox"] {
+      display: none;
+    }
+    .option-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-faint);
+      transition: background 0.12s;
+    }
+    .option-pill.active .option-dot {
+      background: var(--accent-green);
+    }
+
+    /* ── Preview ── */
+    .preview-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-primary);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .preview-header {
+      padding: 4px 10px;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      background: var(--bg-tertiary);
+      border-bottom: 1px solid var(--border-secondary);
+    }
+    .preview-body {
+      padding: 6px 10px;
+      font-size: 10px;
+      font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      word-break: break-all;
+      max-height: 90px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .preview-body .key { color: var(--accent-blue); font-weight: 600; }
+    .preview-body .url { color: var(--accent-green); }
+    .preview-body .empty-hint { color: var(--text-faint); font-style: italic; }
+
+    /* ── Toggle row ── */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 12px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-primary);
+      border-radius: 8px;
+    }
+    .toggle-row-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+    .toggle-row-hint {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: var(--text-faint);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .slider:before {
+      content: '';
+      position: absolute;
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background: var(--bg-primary);
+      border-radius: 50%;
+      transition: 0.2s;
+    }
+    .toggle input:checked + .slider { background: var(--accent-blue); }
+    .toggle input:checked + .slider:before { transform: translateX(16px); background: #fff; }
+
+    /* ── Buttons ── */
+    .btn-primary {
+      width: 100%;
+      padding: 8px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      background: var(--accent-blue);
+      color: #fff;
+      transition: all 0.15s;
+    }
+    .btn-primary:hover { filter: brightness(1.1); }
+    .btn-primary:active { transform: scale(0.98); }
+
+    /* ── Status ── */
+    #status {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: center;
+      min-height: 14px;
+    }
+    #status:empty { display: none; }
+    #status.success { color: var(--accent-green); }
+    #status.error { color: var(--accent-red); }
+
+    /* ── Footer ── */
+    .footer {
+      padding: 8px 16px 10px;
+      text-align: center;
+      border-top: 1px solid var(--border-secondary);
+    }
+    .footer a {
+      font-size: 11px;
+      color: var(--accent-blue);
+      text-decoration: none;
+      cursor: pointer;
+      transition: opacity 0.12s;
+    }
+    .footer a:hover { text-decoration: underline; }
+    .footer a.disabled { color: var(--text-faint); pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1><span>VoxGlide</span> Extension</h1>
+    <div class="header-sub">Voice AI for any web page</div>
+  </div>
+
+  <div class="content">
+    <div class="form-group">
+      <label class="form-label">Server URL</label>
+      <input type="text" id="serverUrl" placeholder="https://your-voxglide-server.com" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Options</label>
+      <div class="options">
+        <label class="option-pill active" data-for="optAutoContext">
+          <span class="option-dot"></span>
+          <input type="checkbox" id="optAutoContext" checked />Auto Context
+        </label>
+        <label class="option-pill active" data-for="optTts">
+          <span class="option-dot"></span>
+          <input type="checkbox" id="optTts" checked />TTS
+        </label>
+        <label class="option-pill" data-for="optDebug">
+          <span class="option-dot"></span>
+          <input type="checkbox" id="optDebug" />Debug
+        </label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Context <span style="text-transform:none;font-weight:400;color:var(--text-faint)">(optional)</span></label>
+      <textarea id="context" placeholder="Describe what this page is or what the assistant should help with"></textarea>
+    </div>
+
+    <div class="preview-card">
+      <div class="preview-header">Preview</div>
+      <div class="preview-body" id="preview"><span class="empty-hint">Enter a server URL to see preview</span></div>
+    </div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-row-label">Auto-inject on every page</div>
+        <div class="toggle-row-hint">Automatically inject SDK on navigation</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="autoInject" /><span class="slider"></span></label>
+    </div>
+
+    <button class="btn-primary" id="inject">Inject Now</button>
+    <div id="status"></div>
+  </div>
+
+  <div class="footer">
+    <a id="adminLink" class="disabled">Open Admin Dashboard</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
