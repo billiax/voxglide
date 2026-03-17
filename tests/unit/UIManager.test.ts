@@ -74,6 +74,48 @@ describe('UIManager', () => {
       ui.destroy();
     });
 
+    it('supports center position', () => {
+      const ui = new UIManager({ position: 'center' }, onToggle);
+      const shadow = ui.getHost().shadowRoot!;
+      const wrapper = shadow.querySelector('.vsdk-container');
+      expect(wrapper!.classList.contains('center')).toBe(true);
+      ui.destroy();
+    });
+
+    it('supports bottom-center position', () => {
+      const ui = new UIManager({ position: 'bottom-center' }, onToggle);
+      const shadow = ui.getHost().shadowRoot!;
+      const wrapper = shadow.querySelector('.vsdk-container');
+      expect(wrapper!.classList.contains('bottom-center')).toBe(true);
+      ui.destroy();
+    });
+
+    it('supports center-right position', () => {
+      const ui = new UIManager({ position: 'center-right' }, onToggle);
+      const shadow = ui.getHost().shadowRoot!;
+      const wrapper = shadow.querySelector('.vsdk-container');
+      expect(wrapper!.classList.contains('center-right')).toBe(true);
+      ui.destroy();
+    });
+
+    it('applies custom offset to wrapper', () => {
+      const ui = new UIManager({ offset: { x: 40, y: 60 } }, onToggle);
+      const shadow = ui.getHost().shadowRoot!;
+      const wrapper = shadow.querySelector('.vsdk-container') as HTMLElement;
+      expect(wrapper.style.getPropertyValue('--vsdk-ox')).toBe('40px');
+      expect(wrapper.style.getPropertyValue('--vsdk-oy')).toBe('60px');
+      ui.destroy();
+    });
+
+    it('uses default offset of 20px when not specified', () => {
+      const ui = new UIManager({}, onToggle);
+      const shadow = ui.getHost().shadowRoot!;
+      const wrapper = shadow.querySelector('.vsdk-container') as HTMLElement;
+      expect(wrapper.style.getPropertyValue('--vsdk-ox')).toBe('20px');
+      expect(wrapper.style.getPropertyValue('--vsdk-oy')).toBe('20px');
+      ui.destroy();
+    });
+
     it('creates a floating button inside the shadow DOM', () => {
       const ui = new UIManager({}, onToggle);
       const shadow = ui.getHost().shadowRoot!;

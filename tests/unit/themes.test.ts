@@ -95,6 +95,35 @@ describe('resolveTheme', () => {
     expect(theme.colors.primary).toBe('#2563eb');
     expect(theme.size).toBe('md');
   });
+
+  it('direct buttonSize overrides size preset', () => {
+    const theme = resolveTheme({ theme: { size: 'sm', buttonSize: 64 } });
+    expect(theme.buttonSize).toBe(64);
+    // Other size-derived values still follow preset
+    expect(theme.iconSize).toBe(18);
+    expect(theme.panelMaxWidth).toBe(280);
+  });
+
+  it('direct iconSize overrides size preset', () => {
+    const theme = resolveTheme({ theme: { size: 'lg', iconSize: 20 } });
+    expect(theme.iconSize).toBe(20);
+    expect(theme.buttonSize).toBe(72);
+  });
+
+  it('direct panelWidth overrides size preset', () => {
+    const theme = resolveTheme({ theme: { size: 'md', panelWidth: 500 } });
+    expect(theme.panelMaxWidth).toBe(500);
+    expect(theme.buttonSize).toBe(56);
+  });
+
+  it('all direct size overrides work together', () => {
+    const theme = resolveTheme({
+      theme: { buttonSize: 48, iconSize: 22, panelWidth: 350 },
+    });
+    expect(theme.buttonSize).toBe(48);
+    expect(theme.iconSize).toBe(22);
+    expect(theme.panelMaxWidth).toBe(350);
+  });
 });
 
 describe('buildStyles', () => {
@@ -168,6 +197,27 @@ describe('buildStyles', () => {
     const theme = resolveTheme();
     const css = buildStyles(theme);
     expect(css).toContain('focus-visible');
+  });
+
+  it('includes CSS for all position variants', () => {
+    const theme = resolveTheme();
+    const css = buildStyles(theme);
+    expect(css).toContain('.vsdk-container.bottom-right');
+    expect(css).toContain('.vsdk-container.bottom-left');
+    expect(css).toContain('.vsdk-container.top-right');
+    expect(css).toContain('.vsdk-container.top-left');
+    expect(css).toContain('.vsdk-container.bottom-center');
+    expect(css).toContain('.vsdk-container.top-center');
+    expect(css).toContain('.vsdk-container.center-right');
+    expect(css).toContain('.vsdk-container.center-left');
+    expect(css).toContain('.vsdk-container.center');
+  });
+
+  it('uses offset CSS variables for positioning', () => {
+    const theme = resolveTheme();
+    const css = buildStyles(theme);
+    expect(css).toContain('--vsdk-ox');
+    expect(css).toContain('--vsdk-oy');
   });
 
   it('includes paused CSS variable', () => {
