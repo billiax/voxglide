@@ -93,9 +93,9 @@ export function resolveTheme(uiConfig: UIConfig = {}): ResolvedTheme {
     size,
     borderRadius: theme.borderRadius ?? '12px',
     colorScheme: theme.colorScheme ?? 'auto',
-    buttonSize: sizeValues.buttonSize,
-    iconSize: sizeValues.iconSize,
-    panelMaxWidth: sizeValues.panelMaxWidth,
+    buttonSize: theme.buttonSize ?? sizeValues.buttonSize,
+    iconSize: theme.iconSize ?? sizeValues.iconSize,
+    panelMaxWidth: theme.panelWidth ?? sizeValues.panelMaxWidth,
     customProperties: theme.customProperties ?? {},
   };
 }

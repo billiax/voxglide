@@ -6,6 +6,7 @@ import { buildStyles } from './styles';
 import { resolveTheme } from './themes';
 import { FloatingButton } from './FloatingButton';
 import { TranscriptOverlay } from './TranscriptOverlay';
+import { SettingsPanel } from './SettingsPanel';
 import { UIStateMachine } from './UIStateMachine';
 import type { InputMode } from './FloatingButton';
 
@@ -13,8 +14,10 @@ export class UIManager {
   private host: HTMLElement;
   private shadowRoot: ShadowRoot;
   private wrapper: HTMLElement;
+  private styleEl: HTMLStyleElement;
   private button: FloatingButton;
   private transcript: TranscriptOverlay | null = null;
+  private settingsPanel: SettingsPanel | null = null;
   private config: Required<UIConfig>;
   private inputMode: InputMode;
   private abortController = new AbortController();
@@ -49,9 +52,9 @@ export class UIManager {
 
     // Resolve theme and inject styles
     const resolvedTheme = resolveTheme(this.config);
-    const style = document.createElement('style');
-    style.textContent = buildStyles(resolvedTheme);
-    this.shadowRoot.appendChild(style);
+    this.styleEl = document.createElement('style');
+    this.styleEl.textContent = buildStyles(resolvedTheme);
+    this.shadowRoot.appendChild(this.styleEl);
 
     // Set z-index custom property
     this.shadowRoot.host.setAttribute('style', `--vsdk-z-index: ${this.config.zIndex}`);
@@ -59,6 +62,10 @@ export class UIManager {
     // Create wrapper container
     this.wrapper = document.createElement('div');
     this.wrapper.className = `vsdk-container ${this.config.position}`;
+    const ox = this.config.offset?.x ?? 20;
+    const oy = this.config.offset?.y ?? 20;
+    this.wrapper.style.setProperty('--vsdk-ox', `${ox}px`);
+    this.wrapper.style.setProperty('--vsdk-oy', `${oy}px`);
     this.shadowRoot.appendChild(this.wrapper);
 
     // Create transcript overlay (before button so it appears above)
@@ -67,6 +74,11 @@ export class UIManager {
       if (onSendText) {
         this.transcript.setSendTextHandler(onSendText);
       }
+    }
+
+    // Wire up settings panel if enabled
+    if (this.config.showSettings && this.transcript) {
+      this.transcript.setSettingsClickHandler(() => this.toggleSettings());
     }
 
     // Create floating button
@@ -279,6 +291,65 @@ export class UIManager {
     return this.host;
   }
 
+  /**
+   * Toggle the settings panel open/closed.
+   */
+  private toggleSettings(): void {
+    if (this.destroyed || !this.transcript) return;
+
+    if (this.transcript.isSettingsOpen()) {
+      this.settingsPanel?.destroy();
+      this.settingsPanel = null;
+      this.transcript.hideSettingsView();
+    } else {
+      this.settingsPanel = new SettingsPanel(
+        this.config,
+        (patch) => this.updateConfig(patch),
+        () => this.toggleSettings(),
+      );
+      this.transcript.showSettingsView(this.settingsPanel.getElement());
+    }
+  }
+
+  /**
+   * Apply a partial config update at runtime.
+   * Immediately updates position, offset, and theme in the live UI.
+   */
+  updateConfig(patch: Partial<UIConfig>): void {
+    if (this.destroyed) return;
+
+    // Merge position
+    if (patch.position) {
+      this.config.position = patch.position;
+      this.wrapper.className = `vsdk-container ${this.config.position}`;
+    }
+
+    // Merge offset
+    if (patch.offset) {
+      this.config.offset = { ...this.config.offset, ...patch.offset };
+      const ox = this.config.offset.x ?? 20;
+      const oy = this.config.offset.y ?? 20;
+      this.wrapper.style.setProperty('--vsdk-ox', `${ox}px`);
+      this.wrapper.style.setProperty('--vsdk-oy', `${oy}px`);
+    }
+
+    // Merge theme (deep merge colors)
+    if (patch.theme) {
+      const prev = this.config.theme ?? {};
+      this.config.theme = {
+        ...prev,
+        ...patch.theme,
+        colors: patch.theme.colors
+          ? { ...prev.colors, ...patch.theme.colors }
+          : prev.colors,
+      };
+
+      // Rebuild CSS from resolved theme
+      const resolved = resolveTheme(this.config);
+      this.styleEl.textContent = buildStyles(resolved);
+    }
+  }
+
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
@@ -290,6 +361,8 @@ export class UIManager {
     this.bodyObserver?.disconnect();
     this.bodyObserver = null;
     this.stateMachine.markDestroyed();
+    this.settingsPanel?.destroy();
+    this.settingsPanel = null;
     this.button.destroy();
     this.transcript?.destroy();
     this.host.remove();

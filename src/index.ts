@@ -8,6 +8,7 @@ export type {
   ActionConfig,
   CustomAction,
   UIConfig,
+  UIPosition,
   ThemeColors,
   ThemePreset,
   ThemeSize,

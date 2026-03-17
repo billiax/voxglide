@@ -83,15 +83,25 @@ export interface CustomAction {
   handler: (args: Record<string, unknown>) => Promise<unknown> | unknown;
 }
 
+export type UIPosition =
+  | 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
+  | 'bottom-center' | 'top-center'
+  | 'center-right' | 'center-left'
+  | 'center';
+
 export interface UIConfig {
-  /** Position of the floating button */
-  position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
+  /** Position of the floating button and transcript panel */
+  position?: UIPosition;
+  /** Pixel offset from the anchored edge (default: { x: 20, y: 20 }) */
+  offset?: { x?: number; y?: number };
   /** z-index for the SDK UI container */
   zIndex?: number;
-  /** Primary color (CSS value) — legacy shorthand, prefer theme.colors.primary */
+  /** Primary color (CSS value) — shorthand for theme.colors.primary */
   primaryColor?: string;
   /** Show transcript overlay */
   showTranscript?: boolean;
+  /** Show settings gear icon in the panel header (opens a live config panel) */
+  showSettings?: boolean;
   /** Auto-hide transcript after this many ms of inactivity */
   transcriptAutoHideMs?: number;
   /** Theme configuration */
@@ -122,7 +132,7 @@ export interface ThemeConfig {
   preset?: ThemePreset;
   /** Color overrides */
   colors?: ThemeColors;
-  /** Button/UI size variant */
+  /** Button/UI size variant (sm | md | lg) — sets buttonSize, iconSize, panelWidth together */
   size?: ThemeSize;
   /** Border radius override (CSS value) */
   borderRadius?: string;
@@ -130,6 +140,12 @@ export interface ThemeConfig {
   colorScheme?: ThemeColorScheme;
   /** Arbitrary CSS custom properties to inject */
   customProperties?: Record<string, string>;
+  /** Override button diameter in pixels (overrides size preset) */
+  buttonSize?: number;
+  /** Override icon size in pixels (overrides size preset) */
+  iconSize?: number;
+  /** Override transcript panel width in pixels (overrides size preset) */
+  panelWidth?: number;
 }
 
 export interface ResolvedTheme {

@@ -50,9 +50,11 @@ export const INTERACTIVE_SELECTOR = [
 
 export const DEFAULT_UI: Required<UIConfig> = {
   position: 'bottom-right',
+  offset: { x: 20, y: 20 },
   zIndex: 9999,
   primaryColor: '#2563eb',
   showTranscript: true,
+  showSettings: false,
   transcriptAutoHideMs: 5000,
   theme: {},
 };

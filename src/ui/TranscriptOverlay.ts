@@ -3,7 +3,7 @@ import type { QueueState } from '../ai/types';
 import type { InputMode } from './FloatingButton';
 import { TranscriptStore } from './TranscriptStore';
 import type { StoredTranscriptLine } from './TranscriptStore';
-import { sendIcon, closeIcon } from './icons';
+import { sendIcon, closeIcon, settingsIcon } from './icons';
 
 export class TranscriptOverlay {
   private container: HTMLElement;
@@ -22,6 +22,10 @@ export class TranscriptOverlay {
   private toolStatusEl: HTMLElement | null = null;
   private thinkingEl: HTMLElement | null = null;
   private headerEl: HTMLElement | null = null;
+  private headerRightEl: HTMLElement | null = null;
+  private headerDotEl: HTMLElement | null = null;
+  private hasSettings = false;
+  private settingsViewEl: HTMLElement | null = null;
   private queuePanel: HTMLElement | null = null;
   private queueItems: Map<string, HTMLElement> = new Map();
 
@@ -44,15 +48,18 @@ export class TranscriptOverlay {
     const headerLeft = document.createElement('div');
     headerLeft.className = 'vsdk-panel-header-left';
 
-    const dot = document.createElement('span');
-    dot.className = 'vsdk-panel-dot';
+    this.headerDotEl = document.createElement('span');
+    this.headerDotEl.className = 'vsdk-panel-dot';
 
     const title = document.createElement('span');
     title.className = 'vsdk-panel-title';
     title.textContent = 'Assistant';
 
-    headerLeft.appendChild(dot);
+    headerLeft.appendChild(this.headerDotEl);
     headerLeft.appendChild(title);
+
+    this.headerRightEl = document.createElement('div');
+    this.headerRightEl.className = 'vsdk-panel-header-right';
 
     const closeBtn = document.createElement('button');
     closeBtn.className = 'vsdk-panel-close';
@@ -61,9 +68,10 @@ export class TranscriptOverlay {
     closeBtn.addEventListener('click', () => {
       this.onDisconnect?.();
     });
+    this.headerRightEl.appendChild(closeBtn);
 
     this.headerEl.appendChild(headerLeft);
-    this.headerEl.appendChild(closeBtn);
+    this.headerEl.appendChild(this.headerRightEl);
     this.container.appendChild(this.headerEl);
 
     // Scrollable messages area
@@ -115,9 +123,50 @@ export class TranscriptOverlay {
   }
 
   setHeaderVisible(visible: boolean): void {
-    if (this.headerEl) {
+    if (!this.headerEl) return;
+    if (this.hasSettings) {
+      // Header always visible when settings enabled; toggle only the dot
+      this.headerEl.style.display = '';
+      if (this.headerDotEl) {
+        this.headerDotEl.style.display = visible ? '' : 'none';
+      }
+    } else {
       this.headerEl.style.display = visible ? '' : 'none';
     }
+  }
+
+  setSettingsClickHandler(handler: () => void): void {
+    this.hasSettings = true;
+    const gearBtn = document.createElement('button');
+    gearBtn.className = 'vsdk-settings-btn';
+    gearBtn.innerHTML = settingsIcon;
+    gearBtn.setAttribute('aria-label', 'Settings');
+    gearBtn.addEventListener('click', handler);
+    // Prepend so gear appears before close button
+    this.headerRightEl?.prepend(gearBtn);
+    // Show header immediately so settings is accessible before connect
+    if (this.headerEl) {
+      this.headerEl.style.display = '';
+      if (this.headerDotEl) this.headerDotEl.style.display = 'none';
+    }
+  }
+
+  showSettingsView(el: HTMLElement): void {
+    this.settingsViewEl = el;
+    this.container.classList.add('settings-open');
+    this.container.appendChild(el);
+  }
+
+  hideSettingsView(): void {
+    this.container.classList.remove('settings-open');
+    if (this.settingsViewEl) {
+      this.settingsViewEl.remove();
+      this.settingsViewEl = null;
+    }
+  }
+
+  isSettingsOpen(): boolean {
+    return this.container.classList.contains('settings-open');
   }
 
   addTranscript(event: TranscriptEvent): void {
@@ -399,6 +448,7 @@ export class TranscriptOverlay {
     this.clearAutoHideTimer();
     this.removeThinkingIndicator();
     this.clearQueue();
+    this.hideSettingsView();
     this.container.remove();
   }
 }

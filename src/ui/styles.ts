@@ -66,11 +66,21 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     align-items: flex-end;
     gap: 12px;
     pointer-events: none;
+    --vsdk-ox: 20px;
+    --vsdk-oy: 20px;
   }
-  .vsdk-container.bottom-right { bottom: 20px; right: 20px; }
-  .vsdk-container.bottom-left  { bottom: 20px; left: 20px; align-items: flex-start; }
-  .vsdk-container.top-right    { top: 20px; right: 20px; }
-  .vsdk-container.top-left     { top: 20px; left: 20px; align-items: flex-start; }
+  /* Corner positions */
+  .vsdk-container.bottom-right { bottom: var(--vsdk-oy); right: var(--vsdk-ox); }
+  .vsdk-container.bottom-left  { bottom: var(--vsdk-oy); left: var(--vsdk-ox); align-items: flex-start; }
+  .vsdk-container.top-right    { top: var(--vsdk-oy); right: var(--vsdk-ox); }
+  .vsdk-container.top-left     { top: var(--vsdk-oy); left: var(--vsdk-ox); align-items: flex-start; }
+  /* Edge-center positions */
+  .vsdk-container.bottom-center { bottom: var(--vsdk-oy); left: 50%; transform: translateX(-50%); align-items: center; }
+  .vsdk-container.top-center    { top: var(--vsdk-oy); left: 50%; transform: translateX(-50%); align-items: center; }
+  .vsdk-container.center-right  { top: 50%; right: var(--vsdk-ox); transform: translateY(-50%); }
+  .vsdk-container.center-left   { top: 50%; left: var(--vsdk-ox); transform: translateY(-50%); align-items: flex-start; }
+  /* Dead-center */
+  .vsdk-container.center        { top: 50%; left: 50%; transform: translate(-50%, -50%); align-items: center; }
 
   /* ── Floating button ── */
   .vsdk-btn {
@@ -421,6 +431,194 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     to { opacity: 1; transform: translateY(0); }
   }
   @media (hover: none) { .vsdk-queue-cancel { opacity: 1; } }
+
+  /* ── Settings panel ── */
+  .vsdk-panel-header-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .vsdk-settings-btn {
+    pointer-events: auto;
+    border: none;
+    background: none;
+    color: var(--vsdk-text-muted);
+    cursor: pointer;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+  }
+  .vsdk-settings-btn:hover {
+    background: var(--vsdk-border);
+    color: var(--vsdk-text);
+  }
+  .vsdk-settings-btn svg { width: 14px; height: 14px; }
+  .vsdk-settings-btn:focus-visible {
+    outline: 2px solid var(--vsdk-primary);
+    outline-offset: 2px;
+  }
+
+  .vsdk-transcript.settings-open .vsdk-messages,
+  .vsdk-transcript.settings-open .vsdk-text-input-row,
+  .vsdk-transcript.settings-open .vsdk-queue-panel {
+    display: none;
+  }
+
+  .vsdk-settings {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .vsdk-settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--vsdk-border);
+    flex-shrink: 0;
+  }
+  .vsdk-settings-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--vsdk-text);
+  }
+  .vsdk-settings-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .vsdk-settings-body::-webkit-scrollbar { width: 3px; }
+  .vsdk-settings-body::-webkit-scrollbar-track { background: transparent; }
+  .vsdk-settings-body::-webkit-scrollbar-thumb { background: var(--vsdk-border); border-radius: 2px; }
+  .vsdk-settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .vsdk-settings-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--vsdk-text-muted);
+  }
+
+  /* Position grid */
+  .vsdk-pos-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+  }
+  .vsdk-pos-cell {
+    pointer-events: auto;
+    padding: 6px;
+    border: 1.5px solid var(--vsdk-border);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 500;
+    font-family: inherit;
+    color: var(--vsdk-text-muted);
+    text-align: center;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+  .vsdk-pos-cell:hover {
+    border-color: var(--vsdk-primary);
+    color: var(--vsdk-text);
+  }
+  .vsdk-pos-cell.active {
+    background: var(--vsdk-primary);
+    border-color: var(--vsdk-primary);
+    color: white;
+  }
+
+  /* Toggle group */
+  .vsdk-toggle-group {
+    display: flex;
+    gap: 4px;
+  }
+  .vsdk-toggle-btn {
+    pointer-events: auto;
+    flex: 1;
+    padding: 6px 8px;
+    border: 1.5px solid var(--vsdk-border);
+    border-radius: 8px;
+    background: none;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    color: var(--vsdk-text-muted);
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+  .vsdk-toggle-btn:hover {
+    border-color: var(--vsdk-primary);
+    color: var(--vsdk-text);
+  }
+  .vsdk-toggle-btn.active {
+    background: var(--vsdk-primary);
+    border-color: var(--vsdk-primary);
+    color: white;
+  }
+
+  /* Color picker */
+  .vsdk-color-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .vsdk-color-input {
+    pointer-events: auto;
+    width: 32px;
+    height: 32px;
+    border: 1.5px solid var(--vsdk-border);
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 2px;
+    background: none;
+  }
+  .vsdk-color-value {
+    font-size: 12px;
+    color: var(--vsdk-text-muted);
+    font-family: monospace;
+  }
+
+  /* Offset inputs */
+  .vsdk-offset-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .vsdk-offset-label {
+    font-size: 12px;
+    color: var(--vsdk-text-muted);
+    min-width: 12px;
+    font-weight: 500;
+  }
+  .vsdk-offset-input {
+    pointer-events: auto;
+    width: 56px;
+    padding: 5px 8px;
+    border: 1.5px solid var(--vsdk-border);
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    background: var(--vsdk-input-bg);
+    color: var(--vsdk-text);
+    text-align: center;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .vsdk-offset-input:focus {
+    border-color: var(--vsdk-primary);
+  }
 
   /* ── High contrast mode ── */
   :host(.high-contrast) {
