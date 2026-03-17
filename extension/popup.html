@@ -252,6 +252,153 @@
     .toggle input:checked + .slider { background: var(--accent-blue); }
     .toggle input:checked + .slider:before { transform: translateX(16px); background: #fff; }
 
+    /* ── UI Settings ── */
+    .section-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      border: none;
+      background: none;
+      cursor: pointer;
+      padding: 0;
+      font-family: inherit;
+    }
+    .section-toggle:hover .section-arrow { color: var(--text-secondary); }
+    .section-arrow {
+      font-size: 10px;
+      color: var(--text-muted);
+      transition: transform 0.15s;
+    }
+    .section-arrow.open { transform: rotate(90deg); }
+    .section-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-top: 6px;
+    }
+    .ui-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ui-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      min-width: 52px;
+      flex-shrink: 0;
+    }
+
+    /* Position grid */
+    .pos-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 3px;
+      flex: 1;
+    }
+    .pos-cell {
+      padding: 4px;
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      background: none;
+      cursor: pointer;
+      font-size: 9px;
+      font-weight: 600;
+      font-family: inherit;
+      color: var(--text-faint);
+      text-align: center;
+      transition: all 0.12s;
+    }
+    .pos-cell:hover {
+      border-color: var(--accent-blue);
+      color: var(--text-secondary);
+    }
+    .pos-cell.active {
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
+      color: #fff;
+    }
+
+    /* UI pills */
+    .ui-pills {
+      display: flex;
+      gap: 4px;
+      flex: 1;
+    }
+    .ui-pill {
+      flex: 1;
+      padding: 4px 6px;
+      border: 1px solid var(--border-primary);
+      border-radius: 6px;
+      background: none;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 500;
+      font-family: inherit;
+      color: var(--text-muted);
+      text-align: center;
+      transition: all 0.12s;
+    }
+    .ui-pill:hover {
+      border-color: var(--accent-blue);
+      color: var(--text-secondary);
+    }
+    .ui-pill.active {
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
+      color: #fff;
+    }
+
+    /* Color picker */
+    .ui-color-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+    }
+    .ui-color-input {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border-primary);
+      border-radius: 6px;
+      cursor: pointer;
+      padding: 2px;
+      background: none;
+    }
+    .ui-color-value {
+      font-size: 11px;
+      font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+      color: var(--text-muted);
+    }
+
+    /* Offset inputs */
+    .ui-offset-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+    }
+    .ui-offset-lbl {
+      font-size: 10px;
+      color: var(--text-faint);
+      font-weight: 600;
+    }
+    .ui-offset-input {
+      width: 48px;
+      padding: 4px 6px;
+      border: 1px solid var(--border-primary);
+      border-radius: 6px;
+      font-size: 11px;
+      font-family: inherit;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      text-align: center;
+    }
+    .ui-offset-input:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+    }
+
     /* ── Buttons ── */
     .btn-primary {
       width: 100%;
@@ -330,6 +477,61 @@
     <div class="form-group">
       <label class="form-label">Context <span style="text-transform:none;font-weight:400;color:var(--text-faint)">(optional)</span></label>
       <textarea id="context" placeholder="Describe what this page is or what the assistant should help with"></textarea>
+    </div>
+
+    <div class="form-group">
+      <button class="section-toggle" id="uiSettingsToggle">
+        <span class="form-label" style="margin-bottom:0">UI Settings</span>
+        <span class="section-arrow" id="uiSettingsArrow">&#x25B8;</span>
+      </button>
+      <div class="section-body" id="uiSettingsBody" style="display:none">
+        <div class="ui-row">
+          <span class="ui-label">Position</span>
+          <div class="pos-grid" id="positionGrid">
+            <button class="pos-cell" data-pos="top-left">TL</button>
+            <button class="pos-cell" data-pos="top-center">TC</button>
+            <button class="pos-cell" data-pos="top-right">TR</button>
+            <button class="pos-cell" data-pos="center-left">CL</button>
+            <button class="pos-cell" data-pos="center">C</button>
+            <button class="pos-cell" data-pos="center-right">CR</button>
+            <button class="pos-cell" data-pos="bottom-left">BL</button>
+            <button class="pos-cell" data-pos="bottom-center">BC</button>
+            <button class="pos-cell active" data-pos="bottom-right">BR</button>
+          </div>
+        </div>
+        <div class="ui-row">
+          <span class="ui-label">Size</span>
+          <div class="ui-pills" id="sizeGroup">
+            <button class="ui-pill" data-val="sm">S</button>
+            <button class="ui-pill active" data-val="md">M</button>
+            <button class="ui-pill" data-val="lg">L</button>
+          </div>
+        </div>
+        <div class="ui-row">
+          <span class="ui-label">Theme</span>
+          <div class="ui-pills" id="themeGroup">
+            <button class="ui-pill active" data-val="auto">Auto</button>
+            <button class="ui-pill" data-val="light">Light</button>
+            <button class="ui-pill" data-val="dark">Dark</button>
+          </div>
+        </div>
+        <div class="ui-row">
+          <span class="ui-label">Color</span>
+          <div class="ui-color-group">
+            <input type="color" id="accentColor" value="#2563eb" class="ui-color-input" />
+            <span class="ui-color-value" id="accentColorLabel">#2563eb</span>
+          </div>
+        </div>
+        <div class="ui-row">
+          <span class="ui-label">Offset</span>
+          <div class="ui-offset-group">
+            <span class="ui-offset-lbl">X</span>
+            <input type="number" id="offsetX" value="20" min="0" max="200" class="ui-offset-input" />
+            <span class="ui-offset-lbl">Y</span>
+            <input type="number" id="offsetY" value="20" min="0" max="200" class="ui-offset-input" />
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="preview-card">

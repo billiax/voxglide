@@ -75,6 +75,36 @@ async function injectNbtFunctions(tabId, httpBase, tabUrl) {
   }
 }
 
+// Build UI config string for init code (only non-default values)
+function buildUiConfigStr(data) {
+  const pos = data.uiPosition || 'bottom-right';
+  const size = data.uiSize || 'md';
+  const theme = data.uiTheme || 'auto';
+  const color = data.uiAccentColor || '#2563eb';
+  const ox = data.uiOffsetX !== undefined ? data.uiOffsetX : 20;
+  const oy = data.uiOffsetY !== undefined ? data.uiOffsetY : 20;
+
+  const uiLines = [];
+  if (pos !== 'bottom-right') uiLines.push(`    position: '${pos}'`);
+  if (ox !== 20 || oy !== 20) {
+    uiLines.push(`    offset: { x: ${ox}, y: ${oy} }`);
+  }
+  const themeLines = [];
+  if (size !== 'md') themeLines.push(`      size: '${size}'`);
+  if (theme === 'dark') {
+    themeLines.push("      preset: 'dark'", "      colorScheme: 'dark'");
+  } else if (theme === 'light') {
+    themeLines.push("      preset: 'light'", "      colorScheme: 'light'");
+  }
+  if (color !== '#2563eb') {
+    themeLines.push(`      colors: { primary: '${color}' }`);
+  }
+  if (themeLines.length > 0) {
+    uiLines.push('    theme: {\n' + themeLines.join(',\n') + '\n    }');
+  }
+  return uiLines;
+}
+
 // Build injection params from stored settings
 function buildInjectionParams(data) {
   const url = (data.serverUrl || '').trim();
@@ -94,21 +124,23 @@ function buildInjectionParams(data) {
 
   const scriptUrl = `${httpBase}/sdk/voice-sdk.iife.js`;
 
-  const config = { serverUrl: `'${wsBase}'` };
-  if (data.optAutoContext !== false) config.autoContext = 'true';
-  if (data.optTts !== false) config.tts = 'true';
-  if (data.optDebug) config.debug = 'true';
+  const lines = [];
+  lines.push(`  serverUrl: '${wsBase}'`);
+  if (data.optAutoContext !== false) lines.push('  autoContext: true');
+  if (data.optTts !== false) lines.push('  tts: true');
+  if (data.optDebug) lines.push('  debug: true');
   // Always enable reconnect so the session survives hard navigations
-  config.autoReconnect = 'true';
+  lines.push('  autoReconnect: true');
   if (data.context && data.context.trim()) {
-    config.context = `'${data.context.trim().replace(/'/g, "\\'")}'`;
+    lines.push(`  context: '${data.context.trim().replace(/'/g, "\\'")}'`);
   }
 
-  const entries = Object.entries(config)
-    .map(([k, v]) => `  ${k}: ${v}`)
-    .join(',\n');
+  const uiLines = buildUiConfigStr(data);
+  if (uiLines.length > 0) {
+    lines.push('  ui: {\n' + uiLines.join(',\n') + '\n  }');
+  }
 
-  const initCode = `new VoiceSDK({\n${entries}\n});`;
+  const initCode = `new VoiceSDK({\n${lines.join(',\n')}\n});`;
 
   return { scriptUrl, initCode, httpBase };
 }
@@ -149,7 +181,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (await isSDKAlreadyActive(tabId)) return;
 
     chrome.storage.local.get(
-      ['serverUrl', 'optAutoContext', 'optTts', 'optDebug', 'context', 'autoInject'],
+      ['serverUrl', 'optAutoContext', 'optTts', 'optDebug', 'context', 'autoInject',
+       'uiPosition', 'uiSize', 'uiTheme', 'uiAccentColor', 'uiOffsetX', 'uiOffsetY'],
       (data) => {
         if (!data.autoInject) return;
 
