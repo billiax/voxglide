@@ -1,6 +1,6 @@
 {
   "name": "voxglide",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Embeddable voice AI SDK for web pages — form filling, navigation, Q&A via speech recognition and server proxy",
   "author": "Billiax",
   "license": "MIT",
