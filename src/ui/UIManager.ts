@@ -68,6 +68,15 @@ export class UIManager {
     this.wrapper.style.setProperty('--vsdk-oy', `${oy}px`);
     this.shadowRoot.appendChild(this.wrapper);
 
+    // Stop all click/pointer events from leaking through Shadow DOM to the host page.
+    // Composed events (click, pointerdown, etc.) propagate across shadow boundaries
+    // and can close native modals or trigger handlers on the page behind the SDK UI.
+    for (const eventType of ['click', 'pointerdown', 'pointerup', 'mousedown', 'mouseup'] as const) {
+      this.wrapper.addEventListener(eventType, (e) => {
+        e.stopPropagation();
+      });
+    }
+
     // Create transcript overlay (before button so it appears above)
     if (this.config.showTranscript) {
       this.transcript = new TranscriptOverlay(this.wrapper, this.config.transcriptAutoHideMs, inputMode);
