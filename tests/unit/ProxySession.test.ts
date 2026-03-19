@@ -131,27 +131,22 @@ describe('ProxySession', () => {
   // ── Speech Debounce Tests ──
 
   describe('speech debounce', () => {
-    it('batches rapid isFinal results into a single send', async () => {
-      const session = new ProxySession(makeConfig({ speechEnabled: false }), makeCallbacks());
-      const sessionConnect = session.connect();
-      const ws = mockWsInstance;
-      ws.simulateOpen();
-      ws.simulateMessage({ type: 'session.started', sessionId: 'sid2' });
-      await sessionConnect;
+    // Silence timeout is 1500ms, hard cap is 5000ms
 
-      // Test debounce behavior via the private debounceSpeechSend method
+    it('batches rapid isFinal results into a single send', async () => {
+      const { session, ws } = await connectSession();
+
       const debounceFn = (session as any).debounceSpeechSend.bind(session);
 
       // Rapid calls
       debounceFn('change surname to Smith');
       debounceFn('and set email to test@email.com');
 
-      // Before timeout: nothing sent
-      const textMsgsBefore = ws.sentOfType('text');
-      expect(textMsgsBefore).toHaveLength(0);
+      // Before silence timeout: nothing sent
+      expect(ws.sentOfType('text')).toHaveLength(0);
 
-      // After timeout: single combined message
-      vi.advanceTimersByTime(800);
+      // After silence timeout (1500ms): single combined message
+      vi.advanceTimersByTime(1500);
       const textMsgs = ws.sentOfType('text');
       expect(textMsgs).toHaveLength(1);
       expect(textMsgs[0].text).toBe('change surname to Smith and set email to test@email.com');
@@ -159,26 +154,87 @@ describe('ProxySession', () => {
       await session.disconnect();
     });
 
-    it('resets timer on each new isFinal', async () => {
-      const session = new ProxySession(makeConfig(), makeCallbacks());
-      const sessionConnect = session.connect();
-      const ws = mockWsInstance;
-      ws.simulateOpen();
-      ws.simulateMessage({ type: 'session.started', sessionId: 'sid' });
-      await sessionConnect;
+    it('resets silence timer on each new isFinal', async () => {
+      const { session, ws } = await connectSession();
 
       const debounceFn = (session as any).debounceSpeechSend.bind(session);
 
       debounceFn('hello');
-      vi.advanceTimersByTime(100); // 100ms in, not yet fired (150ms debounce)
+      vi.advanceTimersByTime(1000); // 1000ms in, not yet fired (1500ms silence)
       debounceFn('world');
-      vi.advanceTimersByTime(100); // 100ms after second call, still not 150
+      vi.advanceTimersByTime(1000); // 1000ms after second call, still not 1500
       expect(ws.sentOfType('text')).toHaveLength(0);
 
-      vi.advanceTimersByTime(50); // Now 150ms after second call
+      vi.advanceTimersByTime(500); // Now 1500ms after second call
       const msgs = ws.sentOfType('text');
       expect(msgs).toHaveLength(1);
       expect(msgs[0].text).toBe('hello world');
+
+      await session.disconnect();
+    });
+
+    it('interim results extend the silence timer', async () => {
+      const { session, ws } = await connectSession();
+
+      const debounceFn = (session as any).debounceSpeechSend.bind(session);
+      const extendFn = (session as any).extendSpeechDebounce.bind(session);
+
+      debounceFn('create an issue');
+      vi.advanceTimersByTime(1000); // 1s in, user starts speaking again
+
+      // Simulate interim results (user is mid-word)
+      extendFn();
+      vi.advanceTimersByTime(500);
+      extendFn();
+      vi.advanceTimersByTime(500); // 2s total, but silence timer keeps resetting
+
+      // Still not sent because interims kept extending
+      expect(ws.sentOfType('text')).toHaveLength(0);
+
+      // Now a final arrives with the rest of the sentence
+      debounceFn('about the login bug');
+
+      // Wait for silence timeout
+      vi.advanceTimersByTime(1500);
+      const msgs = ws.sentOfType('text');
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].text).toBe('create an issue about the login bug');
+
+      await session.disconnect();
+    });
+
+    it('hard cap flushes even with continuous interims', async () => {
+      const { session, ws } = await connectSession();
+
+      const debounceFn = (session as any).debounceSpeechSend.bind(session);
+      const extendFn = (session as any).extendSpeechDebounce.bind(session);
+
+      debounceFn('long speech');
+
+      // Keep extending with interims every 500ms for 6 seconds
+      for (let t = 0; t < 12; t++) {
+        vi.advanceTimersByTime(500);
+        extendFn();
+      }
+
+      // Hard cap is 5000ms — should have flushed by now
+      const msgs = ws.sentOfType('text');
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].text).toBe('long speech');
+
+      await session.disconnect();
+    });
+
+    it('does not extend when no pending text', async () => {
+      const { session, ws } = await connectSession();
+
+      const extendFn = (session as any).extendSpeechDebounce.bind(session);
+
+      // Extend without any pending text — should be a no-op
+      extendFn();
+      vi.advanceTimersByTime(2000);
+
+      expect(ws.sentOfType('text')).toHaveLength(0);
 
       await session.disconnect();
     });
@@ -191,6 +247,23 @@ describe('ProxySession', () => {
       const msgs = ws.sentOfType('text');
       expect(msgs).toHaveLength(1);
       expect(msgs[0].text).toBe('direct message');
+
+      await session.disconnect();
+    });
+
+    it('sendText flushes pending speech first', async () => {
+      const { session, ws } = await connectSession();
+
+      const debounceFn = (session as any).debounceSpeechSend.bind(session);
+      debounceFn('pending speech');
+
+      // Now sendText — should flush pending speech, then send typed text
+      session.sendText('typed message');
+
+      const msgs = ws.sentOfType('text');
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0].text).toBe('pending speech');
+      expect(msgs[1].text).toBe('typed message');
 
       await session.disconnect();
     });

@@ -52,6 +52,7 @@ export interface TrackedSession {
   turnQueue: QueuedTurn[];
   turnProcessing: boolean;
   activeTurn: QueuedTurn | null;
+  settlingTimer: ReturnType<typeof setTimeout> | null;
   lastScanData: any | null;
   screenshots: Map<string, string>; // url -> base64 image (latest per URL)
 }

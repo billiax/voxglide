@@ -13,3 +13,4 @@ export const MAX_TOOL_DEPTH = 5;
 export const MAX_HISTORY_ENTRIES = 200;
 export const MAX_LLM_CONTEXT_ENTRIES = 20; // Max history entries sent to LLM per call
 export const CACHE_TTL = '600s'; // 10 min
+export const TURN_SETTLING_MS = 500; // Delay before processing a new turn to allow text merging

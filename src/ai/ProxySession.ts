@@ -14,14 +14,14 @@ export class ProxySession {
   private pendingToolResults: Map<string, (results: any[]) => void> = new Map();
   private streamingText = '';
 
-  // Speech debounce: batches rapid isFinal results into a single send
+  // Speech debounce: batches speech results into a single send using silence detection.
+  // Interim results (user still speaking) reset the silence timer so we don't
+  // flush mid-sentence. The hard cap ensures we never hold text indefinitely.
   private speechDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private speechDebounceText = '';
-  private static readonly SPEECH_DEBOUNCE_MS = 150;
-
-  // Speech debounce max delay cap
   private speechDebounceStart: number | null = null;
-  private static readonly SPEECH_MAX_DEBOUNCE_MS = 500;
+  private static readonly SPEECH_SILENCE_MS = 1500;  // Flush after 1.5s of no speech activity
+  private static readonly SPEECH_MAX_HOLD_MS = 5000;  // Hard cap — never hold longer than 5s
 
   // Send queue: buffers text messages when WS is not OPEN
   private sendQueue: Array<{ type: string;[key: string]: any }> = [];
@@ -249,9 +249,13 @@ export class ProxySession {
         // Emit user transcript locally
         this.callbacks.onTranscript(text, 'user', isFinal);
 
-        // Only send final transcripts to server, debounced to batch rapid finals
         if (isFinal && text.trim()) {
+          // Final result: accumulate text and start/reset silence timer
           this.debounceSpeechSend(text.trim());
+        } else if (!isFinal && this.speechDebounceText) {
+          // Interim result while we have pending text — user is still talking.
+          // Reset the silence timer so we don't flush mid-sentence.
+          this.extendSpeechDebounce();
         }
       },
       (listening) => {
@@ -263,9 +267,10 @@ export class ProxySession {
   }
 
   /**
-   * Batches rapid isFinal speech results into a single server send.
-   * Resets/extends an 800ms timer on each call, but caps total delay at 2000ms.
-   * On timeout, sends the combined text and flushes any pending context update.
+   * Accumulates final speech results and starts a silence timer.
+   * The timer resets on each final AND on interim results (via extendSpeechDebounce),
+   * so text is only flushed after 1.5s of total silence. A hard cap (5s) ensures
+   * we never hold text indefinitely in pathological cases.
    */
   private debounceSpeechSend(text: string): void {
     if (this.speechDebounceText) {
@@ -274,37 +279,46 @@ export class ProxySession {
       this.speechDebounceText = text;
     }
 
-    // Track when batching started
+    // Track when batching started (for hard cap)
     if (this.speechDebounceStart === null) {
       this.speechDebounceStart = Date.now();
     }
 
+    this.resetSilenceTimer();
+  }
+
+  /**
+   * Reset the silence timer when interim results arrive (user still speaking).
+   * Only extends if we have pending text; respects the hard cap.
+   */
+  private extendSpeechDebounce(): void {
+    if (!this.speechDebounceText || this.speechDebounceStart === null) return;
+    this.resetSilenceTimer();
+  }
+
+  /**
+   * (Re)start the silence timer. Flushes immediately if the hard cap is exceeded,
+   * otherwise sets a timer capped to the remaining hard-cap window.
+   */
+  private resetSilenceTimer(): void {
     if (this.speechDebounceTimer) {
       clearTimeout(this.speechDebounceTimer);
     }
 
-    const elapsed = Date.now() - this.speechDebounceStart;
+    const elapsed = Date.now() - (this.speechDebounceStart ?? Date.now());
 
-    // If max debounce time exceeded, flush immediately
-    if (elapsed >= ProxySession.SPEECH_MAX_DEBOUNCE_MS) {
+    // Hard cap exceeded — flush immediately
+    if (elapsed >= ProxySession.SPEECH_MAX_HOLD_MS) {
       this.flushSpeechDebounce();
       return;
     }
 
-    // Cap the timer delay to remaining time within max debounce window
-    const remaining = ProxySession.SPEECH_MAX_DEBOUNCE_MS - elapsed;
-    const delay = Math.min(ProxySession.SPEECH_DEBOUNCE_MS, remaining);
+    // Silence timer, capped to remaining hard-cap time
+    const remaining = ProxySession.SPEECH_MAX_HOLD_MS - elapsed;
+    const delay = Math.min(ProxySession.SPEECH_SILENCE_MS, remaining);
 
     this.speechDebounceTimer = setTimeout(() => {
-      this.speechDebounceTimer = null;
-      this.speechDebounceStart = null;
-      const combined = this.speechDebounceText;
-      this.speechDebounceText = '';
-      if (combined) {
-        this.send({ type: 'text', text: combined });
-      }
-      // Flush any pending context update that was deferred during speech debounce
-      this.flushPendingContextUpdate();
+      this.flushSpeechDebounce();
     }, delay);
   }
 

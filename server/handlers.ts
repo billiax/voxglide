@@ -1,7 +1,7 @@
 import { WebSocket } from 'ws';
 import crypto from 'crypto';
 import type { TrackedSession } from './types.js';
-import { MAX_HISTORY_ENTRIES, KEEP_RECENT_TURNS, SESSION_CLEANUP_MS, provider } from './config.js';
+import { MAX_HISTORY_ENTRIES, KEEP_RECENT_TURNS, SESSION_CLEANUP_MS, TURN_SETTLING_MS, provider } from './config.js';
 import {
   trackedSessions, wsToSessionId, generateSessionId, getTrackedByWs,
   logSessionEvent, broadcastToAdmins, getSessionSummary, broadcastQueueState,
@@ -43,7 +43,11 @@ export function handleSessionStart(clientWs: WebSocket, msg: any): void {
     // Reject pending tool promises
     rejectAllPendingToolResults(existing, 'Client reconnected');
 
-    // Clear stale turn queue
+    // Clear stale turn queue and settling timer
+    if (existing.settlingTimer) {
+      clearTimeout(existing.settlingTimer);
+      existing.settlingTimer = null;
+    }
     existing.turnQueue.length = 0;
     existing.turnProcessing = false;
 
@@ -118,6 +122,7 @@ export function handleSessionStart(clientWs: WebSocket, msg: any): void {
     turnQueue: [],
     turnProcessing: false,
     activeTurn: null,
+    settlingTimer: null,
     lastScanData: null,
     screenshots: new Map(),
   };
@@ -199,7 +204,17 @@ export function handleText(tracked: TrackedSession, msg: any): void {
   broadcastQueueState(tracked);
 
   if (!tracked.turnProcessing) {
-    processTurnQueue(tracked);
+    // Settling delay: wait before processing to widen the text-merge window.
+    // Speech may arrive as multiple WS messages in quick succession; this delay
+    // lets late-arriving fragments merge into the queued turn instead of racing
+    // against LLM processing. The merge logic above handles the actual merge.
+    if (tracked.settlingTimer) clearTimeout(tracked.settlingTimer);
+    tracked.settlingTimer = setTimeout(() => {
+      tracked.settlingTimer = null;
+      if (!tracked.turnProcessing && tracked.turnQueue.length > 0) {
+        processTurnQueue(tracked);
+      }
+    }, TURN_SETTLING_MS);
   }
 }
 
@@ -294,6 +309,10 @@ export function handleWsClose(clientWs: WebSocket): void {
   tracked.activeTurn?.abortController?.abort();  // Cancel streaming
   tracked.activeTurn = null;
   rejectAllPendingToolResults(tracked, 'Client disconnected');  // Unblock promises
+  if (tracked.settlingTimer) {
+    clearTimeout(tracked.settlingTimer);
+    tracked.settlingTimer = null;
+  }
   tracked.turnQueue.length = 0;
   tracked.turnProcessing = false;
 
