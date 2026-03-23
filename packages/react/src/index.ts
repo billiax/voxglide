@@ -1,21 +1,18 @@
 // Components
-export { VoiceProvider } from './VoiceProvider';
-export { VoiceAssistant } from './VoiceAssistant';
+export { VoxGlideProvider, VoxGlideContext } from './provider';
 
 // Hooks
-export { useVoiceSDK } from './useVoiceSDK';
-export { useVoiceAction } from './useVoiceAction';
-export { useVoiceTranscript } from './useVoiceTranscript';
+export { useVoxGlide, useVoxGlideEvent } from './hooks';
 
-// Context (for advanced usage)
-export { VoiceContext } from './context';
+// Script loader (for advanced usage)
+export { loadVoiceSDK, deriveScriptUrl } from './script-loader';
 
-// Types
+// Types (React-specific only — for SDK types, install `voxglide`)
 export type {
+  VoiceSDKInstance,
+  VoiceSDKConstructor,
   VoiceState,
   TranscriptEntry,
-  VoiceContextValue,
-  VoiceProviderProps,
-  VoiceAssistantProps,
-  UseVoiceSDKOptions,
+  VoxGlideContextValue,
+  VoxGlideProviderProps,
 } from './types';
