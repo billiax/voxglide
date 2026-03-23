@@ -203,9 +203,10 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
       }
     }
 
-    // Wire disconnect handler from panel header
+    // Wire panel header handlers
     if (this.ui) {
       this.ui.setDisconnectHandler(() => this.stop());
+      this.ui.setMinimizeHandler(() => this.ui?.hideTranscript());
     }
 
     // Set up SPA navigation detection + beforeunload session persistence
@@ -264,6 +265,10 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
       const pending = this.pendingReconnectSnapshot ?? NavigationHandler.getPendingReconnect();
       if (pending?.sessionId) {
         storedSessionId = pending.sessionId;
+      } else {
+        // Fresh start (not navigation reconnect) — clear stale transcript
+        // so the user gets a clean slate. The AI has no memory of old messages.
+        this.ui?.clearTranscript();
       }
       // Clear snapshot after use — one-time consumption
       this.pendingReconnectSnapshot = null;
@@ -293,8 +298,10 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           if (status === 'connected') {
             this.setConnectionState(ConnectionState.CONNECTED);
             this.emit('connected');
-            // Show transcript panel immediately so user can see input + type
+            // Disable auto-hide during active session — user controls visibility
+            // via the minimize button. Re-enabled on disconnect.
             this.ui?.setAutoHideEnabled(false);
+            // Show transcript panel immediately so user can see input + type
             this.ui?.showTranscript();
             // Store sessionId for navigation handler
             if (this.session?.sessionId) {
@@ -326,6 +333,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
 
           // Speak AI responses if TTS is enabled
           if (speaker === 'ai' && isFinal && this.ttsEnabled) {
+            this.ui?.setPauseReason('tts');
             this.ttsManager.speak(text);
           }
         },
@@ -373,6 +381,24 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           this.speechCurrentlyActive = active;
           this.speechRunning = running;
           this.ui?.setSpeechState(active, paused);
+          // Clear pause reason when speech successfully resumes
+          if (active && !paused) {
+            this.ui?.setPauseReason(null);
+          }
+        },
+        onSpeechError: (error, retriesLeft) => {
+          this.ui?.setPauseReason('mic-error');
+          if (retriesLeft === 0) {
+            this.ui?.addSystemMessage('Microphone unavailable. Use text input instead.');
+            this.ui?.setPauseReason(null);
+          } else if (error === 'not-allowed') {
+            this.ui?.addSystemMessage('Microphone access denied. Check browser permissions.');
+          } else {
+            this.ui?.addSystemMessage('Microphone busy — retrying...');
+          }
+        },
+        onQueueOverflow: () => {
+          this.ui?.addSystemMessage('Message not sent — connection interrupted. Please try again.');
         },
         onQueueUpdate: (queue) => {
           this.ui?.updateQueue(queue);
@@ -408,33 +434,56 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   }
 
   /**
-   * Toggle start/stop.
-   * In text mode while connected: toggle panel visibility.
-   * In voice mode while connected: disconnect session.
-   * While disconnected/error: connect.
+   * Toggle — 3-state button behavior:
+   *
+   * Voice mode (primary):
+   *   Disconnected/error → start (connect + mic + open panel)
+   *   Connected + panel visible → stop (disconnect session)
+   *   Connected + panel hidden (minimized) → show panel
+   *   Connected + speech failed but retrying → retry with user gesture
+   *
+   * Text mode (backup/testing):
+   *   Disconnected/error → start
+   *   Connected → toggle panel visibility (session persists)
    */
   async toggle(): Promise<void> {
     if (this.destroyed) return;
     // Guard against concurrent toggle calls (double-clicks, etc.)
     if (this.toggling) return;
 
-    if (this.resolvedInputMode === 'text' && this.connectionState === ConnectionState.CONNECTED) {
-      this.ui?.toggleTranscript();
+    if (this.connectionState === ConnectionState.CONNECTED) {
+      if (this.resolvedInputMode === 'text') {
+        // Text mode: always toggle panel visibility, session persists
+        this.ui?.toggleTranscript();
+        return;
+      }
+
+      // Voice mode: 3-state logic
+      if (!this.speechCurrentlyActive && this.speechRunning && this.session) {
+        // Speech failed but intending to run — retry with user gesture
+        this.session.retrySpeech();
+        return;
+      }
+
+      const panelVisible = this.ui?.getStateMachine().getState().panelVisible ?? true;
+      if (panelVisible) {
+        // Panel visible → stop session (one-click stop, like every voice assistant)
+        this.toggling = true;
+        try {
+          await this.stop();
+        } finally {
+          this.toggling = false;
+        }
+      } else {
+        // Panel hidden (user minimized) → show panel, session stays alive
+        this.ui?.showTranscript();
+      }
       return;
     }
 
     this.toggling = true;
     try {
-      if (this.connectionState === ConnectionState.CONNECTED) {
-        // If voice mode and speech isn't actively capturing but intends to be running
-        // (i.e. in a restart loop or recovery), retry with this user gesture.
-        // If speech has fully given up (running=false), disconnect the session.
-        if (this.resolvedInputMode === 'voice' && !this.speechCurrentlyActive && this.speechRunning && this.session) {
-          this.session.retrySpeech();
-        } else {
-          await this.stop();
-        }
-      } else if (this.connectionState === ConnectionState.DISCONNECTED || this.connectionState === ConnectionState.ERROR) {
+      if (this.connectionState === ConnectionState.DISCONNECTED || this.connectionState === ConnectionState.ERROR) {
         await this.start();
       }
     } finally {

@@ -2,6 +2,8 @@ import type { ConnectionStateValue } from '../constants';
 import { ConnectionState } from '../constants';
 import type { InputMode } from './FloatingButton';
 
+export type PauseReason = 'tts' | 'mic-error' | null;
+
 export interface UIState {
   connection: ConnectionStateValue;
   panelVisible: boolean;
@@ -10,6 +12,7 @@ export interface UIState {
   activeTool: string | null;
   speechActive: boolean;
   speechPaused: boolean;
+  pauseReason: PauseReason;
   destroyed: boolean;
 }
 
@@ -28,6 +31,7 @@ export class UIStateMachine {
       activeTool: null,
       speechActive: false,
       speechPaused: false,
+      pauseReason: null,
       destroyed: false,
     };
   }
@@ -48,14 +52,11 @@ export class UIStateMachine {
     if (this.state.connection === connection) return;
     const previous = { ...this.state };
     this.state = { ...this.state, connection };
-    // Auto-show panel on connected
-    if (connection === ConnectionState.CONNECTED) {
-      this.state.panelVisible = true;
-    }
     // Reset speech state on disconnect/error
     if (connection === ConnectionState.DISCONNECTED || connection === ConnectionState.ERROR) {
       this.state.speechActive = false;
       this.state.speechPaused = false;
+      this.state.pauseReason = null;
     }
     this.notify(previous);
   }
@@ -96,6 +97,14 @@ export class UIStateMachine {
     if (this.state.aiThinking === aiThinking) return;
     const previous = { ...this.state };
     this.state = { ...this.state, aiThinking };
+    this.notify(previous);
+  }
+
+  setPauseReason(pauseReason: PauseReason): void {
+    if (this.state.destroyed) return;
+    if (this.state.pauseReason === pauseReason) return;
+    const previous = { ...this.state };
+    this.state = { ...this.state, pauseReason };
     this.notify(previous);
   }
 

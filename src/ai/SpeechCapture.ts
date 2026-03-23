@@ -11,6 +11,7 @@ export class SpeechCapture {
   private recognition: any = null;
   private onResult: ((text: string, isFinal: boolean) => void) | null = null;
   private onStatusChange: ((listening: boolean) => void) | null = null;
+  private onSpeechError: ((error: string, retriesLeft: number) => void) | null = null;
   private running = false;
   private paused = false;
   private language: string;
@@ -46,9 +47,11 @@ export class SpeechCapture {
   start(
     onResult: (text: string, isFinal: boolean) => void,
     onStatusChange?: (listening: boolean) => void,
+    onSpeechError?: (error: string, retriesLeft: number) => void,
   ): void {
     this.onResult = onResult;
     this.onStatusChange = onStatusChange || null;
+    this.onSpeechError = onSpeechError || null;
 
     this.running = true;
     this.createRecognition();
@@ -130,12 +133,15 @@ export class SpeechCapture {
           this.running = false;
           this.clearRecoveryTimer();
           this.onStatusChange?.(false);
+          this.onSpeechError?.(event.error, 0);
           return;
         }
 
+        const retriesLeft = SpeechCapture.MAX_NOT_ALLOWED_RETRIES - this.notAllowedRetries;
         console.warn(
           `[VoiceSDK:SpeechCapture] ${event.error} — retry ${this.notAllowedRetries}/${SpeechCapture.MAX_NOT_ALLOWED_RETRIES}`,
         );
+        this.onSpeechError?.(event.error, retriesLeft);
         this.onStatusChange?.(false);
         this.scheduleRecovery();
         return;
@@ -263,6 +269,7 @@ export class SpeechCapture {
     this.onResult = null;
     this.onStatusChange?.(false);
     this.onStatusChange = null;
+    this.onSpeechError = null;
   }
 
   /**

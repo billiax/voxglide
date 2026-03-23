@@ -29,6 +29,8 @@ export interface ProxySessionCallbacks {
   onTokenUpdate: (usage: TokenUsage) => void;
   onDebug: (event: DebugEvent) => void;
   onSpeechStateChange?: (active: boolean, paused: boolean, running: boolean) => void;
+  onSpeechError?: (error: string, retriesLeft: number) => void;
+  onQueueOverflow?: () => void;
   onQueueUpdate?: (queue: QueueState) => void;
 }
 

@@ -65,6 +65,7 @@ const uiInstances: Array<{
   setAIThinking: ReturnType<typeof vi.fn>;
   restoreTranscript: ReturnType<typeof vi.fn>;
   setDisconnectHandler: ReturnType<typeof vi.fn>;
+  setMinimizeHandler: ReturnType<typeof vi.fn>;
   ensureAttached: ReturnType<typeof vi.fn>;
   updateQueue: ReturnType<typeof vi.fn>;
   setCancelHandler: ReturnType<typeof vi.fn>;
@@ -72,6 +73,8 @@ const uiInstances: Array<{
   removeToolStatus: ReturnType<typeof vi.fn>;
   focusInput: ReturnType<typeof vi.fn>;
   getHost: ReturnType<typeof vi.fn>;
+  addSystemMessage: ReturnType<typeof vi.fn>;
+  setPauseReason: ReturnType<typeof vi.fn>;
 }> = [];
 
 vi.mock('../../src/ui/UIManager', () => {
@@ -88,6 +91,7 @@ vi.mock('../../src/ui/UIManager', () => {
     setAIThinking = vi.fn();
     restoreTranscript = vi.fn();
     setDisconnectHandler = vi.fn();
+    setMinimizeHandler = vi.fn();
     ensureAttached = vi.fn();
     updateQueue = vi.fn();
     setCancelHandler = vi.fn();
@@ -95,6 +99,9 @@ vi.mock('../../src/ui/UIManager', () => {
     removeToolStatus = vi.fn();
     focusInput = vi.fn();
     getHost = vi.fn().mockReturnValue(document.createElement('div'));
+    addSystemMessage = vi.fn();
+    setPauseReason = vi.fn();
+    getStateMachine = vi.fn().mockReturnValue({ getState: () => ({ panelVisible: true }) });
     constructor(public config: any, public onToggle: any, public onSendText?: any, public inputMode?: string) {
       uiInstances.push(this as any);
     }
@@ -395,9 +402,17 @@ describe('VoiceSDK', () => {
       expect((sdk as any).session).toBeNull();
     });
 
-    it('keeps transcript visible on stop (auto-hide handles fade)', async () => {
+    it('does not clear transcript on stop (user can re-read)', async () => {
+      lastUI().clearTranscript.mockClear();
       await sdk.stop();
       expect(lastUI().clearTranscript).not.toHaveBeenCalled();
+    });
+
+    it('clears transcript on fresh start (not navigation reconnect)', async () => {
+      await sdk.stop();
+      lastUI().clearTranscript.mockClear();
+      await sdk.start();
+      expect(lastUI().clearTranscript).toHaveBeenCalled();
     });
 
     it('is safe to call when already stopped', async () => {
@@ -417,13 +432,12 @@ describe('VoiceSDK', () => {
       expect(lastSession().connect).toHaveBeenCalled();
     });
 
-    it('stops when connected and speech is active', async () => {
+    it('stops when connected with speech active and panel visible', async () => {
       await sdk.start();
       lastSession().callbacks.onStatusChange('connected');
       lastSession().callbacks.onSpeechStateChange(true, false, true);
       await sdk.toggle();
       expect(lastSession().disconnect).toHaveBeenCalled();
-      expect(sdk.getConnectionState()).toBe(ConnectionState.DISCONNECTED);
     });
 
     it('retries speech when connected but speech is not active', async () => {

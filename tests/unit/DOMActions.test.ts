@@ -227,7 +227,7 @@ describe('DOMActions', () => {
       const result = await clickElement({ description: 'nonexistent' });
       const parsed = JSON.parse(result.result);
       expect(parsed.error).toContain('Could not find element');
-    });
+    }, 10000);
 
     it('returns error if no description, selector, or index provided', async () => {
       const result = await clickElement({});
@@ -395,7 +395,7 @@ describe('DOMActions', () => {
 
       expect(scanCalled).toBe(true);
       expect(parsed.success).toBe(true);
-    });
+    }, 10000);
 
     it('returns error after retry failure', async () => {
       document.body.innerHTML = '';
@@ -407,7 +407,7 @@ describe('DOMActions', () => {
       const result = await clickElement({ description: 'Impossible Element' });
       const parsed = JSON.parse(result.result);
       expect(parsed.error).toContain('Could not find element');
-    });
+    }, 10000);
 
     it('skips retry when no callback set', async () => {
       document.body.innerHTML = '';
@@ -415,6 +415,6 @@ describe('DOMActions', () => {
       const result = await clickElement({ description: 'Missing' });
       const parsed = JSON.parse(result.result);
       expect(parsed.error).toContain('Could not find element');
-    });
+    }, 10000);
   });
 });

@@ -262,6 +262,9 @@ export class ProxySession {
         this.debug({ direction: 'info', kind: 'speech', payload: { listening } });
         this.notifySpeechState();
       },
+      (error, retriesLeft) => {
+        this.callbacks.onSpeechError?.(error, retriesLeft);
+      },
     );
     this.notifySpeechState();
   }
@@ -393,9 +396,13 @@ export class ProxySession {
   private send(data: any): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
-    } else if (data.type === 'text' && this.sendQueue.length < ProxySession.MAX_QUEUE_SIZE) {
-      // Queue text messages when WS is not OPEN (other types are timing-sensitive)
-      this.sendQueue.push(data);
+    } else if (data.type === 'text') {
+      if (this.sendQueue.length < ProxySession.MAX_QUEUE_SIZE) {
+        // Queue text messages when WS is not OPEN (other types are timing-sensitive)
+        this.sendQueue.push(data);
+      } else {
+        this.callbacks.onQueueOverflow?.();
+      }
     }
   }
 

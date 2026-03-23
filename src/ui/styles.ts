@@ -123,7 +123,8 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
 
   /* Focus outlines */
   .vsdk-btn:focus-visible,
-  .vsdk-panel-close:focus-visible,
+  .vsdk-panel-minimize:focus-visible,
+  .vsdk-panel-end-session:focus-visible,
   .vsdk-text-send:focus-visible,
   .vsdk-text-input:focus-visible,
   .vsdk-queue-cancel:focus-visible {
@@ -200,7 +201,8 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     color: var(--vsdk-text);
     letter-spacing: -0.01em;
   }
-  .vsdk-panel-close {
+  .vsdk-panel-minimize,
+  .vsdk-panel-end-session {
     pointer-events: auto;
     border: none;
     background: none;
@@ -214,11 +216,16 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     justify-content: center;
     transition: background 0.15s, color 0.15s;
   }
-  .vsdk-panel-close:hover {
+  .vsdk-panel-minimize:hover {
     background: var(--vsdk-border);
     color: var(--vsdk-text);
   }
-  .vsdk-panel-close svg {
+  .vsdk-panel-end-session:hover {
+    background: rgba(220, 38, 38, 0.1);
+    color: var(--vsdk-danger);
+  }
+  .vsdk-panel-minimize svg,
+  .vsdk-panel-end-session svg {
     width: 14px;
     height: 14px;
   }
@@ -266,6 +273,28 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     background: var(--vsdk-ai-bg);
     color: var(--vsdk-ai-text);
     border-bottom-left-radius: 6px;
+  }
+
+  /* Truncation notice */
+  .vsdk-truncation-notice {
+    text-align: center;
+    font-size: 11px;
+    color: var(--vsdk-text-muted);
+    padding: 4px 8px;
+    opacity: 0.6;
+    font-style: italic;
+  }
+
+  /* System messages */
+  .vsdk-transcript-line.vsdk-msg-system {
+    text-align: center;
+    font-size: 12px;
+    color: var(--vsdk-text-muted);
+    font-style: italic;
+    max-width: 100%;
+    background: none;
+    padding: 4px 8px;
+    align-self: center;
   }
 
   /* Restored lines */
@@ -627,7 +656,8 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     --vsdk-border: #000000;
   }
   :host(.high-contrast) .vsdk-btn:focus-visible,
-  :host(.high-contrast) .vsdk-panel-close:focus-visible,
+  :host(.high-contrast) .vsdk-panel-minimize:focus-visible,
+  :host(.high-contrast) .vsdk-panel-end-session:focus-visible,
   :host(.high-contrast) .vsdk-text-send:focus-visible,
   :host(.high-contrast) .vsdk-text-input:focus-visible,
   :host(.high-contrast) .vsdk-queue-cancel:focus-visible {
@@ -635,6 +665,68 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     outline-offset: 2px;
   }
   :host(.high-contrast) .vsdk-btn { border: 2px solid #000000; }
+  /* ── Responsive: Mobile ── */
+  @media (max-width: 480px) {
+    .vsdk-transcript,
+    .vsdk-transcript.text-mode {
+      width: calc(100vw - 24px) !important;
+      min-width: unset !important;
+      max-width: calc(100vw - 24px);
+      max-height: calc(100vh - 120px);
+      max-height: calc(100dvh - 120px);
+      border-radius: 12px;
+    }
+    .vsdk-panel-minimize,
+    .vsdk-panel-end-session,
+    .vsdk-settings-btn {
+      width: 44px;
+      height: 44px;
+    }
+    .vsdk-panel-minimize svg,
+    .vsdk-panel-end-session svg,
+    .vsdk-settings-btn svg {
+      width: 18px;
+      height: 18px;
+    }
+    .vsdk-text-input {
+      font-size: 16px;
+      padding: 12px 16px;
+    }
+    .vsdk-text-send {
+      width: 44px;
+      height: 44px;
+    }
+    .vsdk-queue-cancel { opacity: 1; }
+  }
+
+  /* ── Responsive: Small phones ── */
+  @media (max-width: 374px) {
+    .vsdk-transcript,
+    .vsdk-transcript.text-mode {
+      width: calc(100vw - 16px) !important;
+      min-width: unset !important;
+      max-width: calc(100vw - 16px);
+    }
+  }
+
+  /* ── Landscape with virtual keyboard ── */
+  @media (max-height: 500px) and (orientation: landscape) {
+    .vsdk-transcript,
+    .vsdk-transcript.text-mode {
+      max-height: calc(100vh - 80px);
+      max-height: calc(100dvh - 80px);
+    }
+  }
+
+  /* ── Safe area for notch/Dynamic Island ── */
+  @supports (padding-bottom: env(safe-area-inset-bottom)) {
+    .vsdk-container.bottom-right,
+    .vsdk-container.bottom-left,
+    .vsdk-container.bottom-center {
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+  }
+
 ${darkSection}
 `;
 }

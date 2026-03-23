@@ -705,17 +705,17 @@ describe('UIManager', () => {
   });
 
   describe('setDisconnectHandler()', () => {
-    it('wires disconnect handler to panel close button', () => {
+    it('wires disconnect handler to end-session button', () => {
       const ui = new UIManager({}, onToggle);
       const shadow = ui.getHost().shadowRoot!;
       const disconnectFn = vi.fn();
 
       ui.setDisconnectHandler(disconnectFn);
 
-      // Click the close button in the panel header
-      const closeBtn = shadow.querySelector('.vsdk-panel-close') as HTMLElement;
-      expect(closeBtn).not.toBeNull();
-      closeBtn.click();
+      // Click the end-session button in the panel header
+      const endBtn = shadow.querySelector('.vsdk-panel-end-session') as HTMLElement;
+      expect(endBtn).not.toBeNull();
+      endBtn.click();
       expect(disconnectFn).toHaveBeenCalledTimes(1);
 
       ui.destroy();

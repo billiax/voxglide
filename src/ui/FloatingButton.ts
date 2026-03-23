@@ -53,15 +53,31 @@ export class FloatingButton {
       switch (state.connection) {
         case ConnectionState.CONNECTED:
           if (state.speechPaused) {
-            // Speech paused (TTS playing or text input active)
+            // Speech paused — show reason-specific label
             this.button.classList.add('paused');
             this.button.innerHTML = micPausedIcon;
-            this.button.setAttribute('aria-label', 'Microphone paused');
+            switch (state.pauseReason) {
+              case 'tts':
+                this.button.setAttribute('aria-label', 'Microphone paused — AI speaking');
+                break;
+              case 'mic-error':
+                this.button.setAttribute('aria-label', 'Microphone error — retrying');
+                break;
+              default:
+                this.button.setAttribute('aria-label', 'Microphone paused');
+            }
           } else if (state.speechActive) {
             // Actively recording
             this.button.classList.add('listening');
-            this.button.innerHTML = micOffIcon;
-            this.button.setAttribute('aria-label', 'Stop voice assistant');
+            if (state.panelVisible) {
+              // Panel visible → button will stop session
+              this.button.innerHTML = micOffIcon;
+              this.button.setAttribute('aria-label', 'Stop voice assistant');
+            } else {
+              // Panel minimized → button will reopen panel
+              this.button.innerHTML = micIcon;
+              this.button.setAttribute('aria-label', 'Show transcript');
+            }
           } else {
             // Connected but speech not active (failed or unavailable).
             // Show paused mic so user knows mic isn't capturing.

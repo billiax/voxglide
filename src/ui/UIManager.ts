@@ -8,6 +8,7 @@ import { FloatingButton } from './FloatingButton';
 import { TranscriptOverlay } from './TranscriptOverlay';
 import { SettingsPanel } from './SettingsPanel';
 import { UIStateMachine } from './UIStateMachine';
+import type { PauseReason } from './UIStateMachine';
 import type { InputMode } from './FloatingButton';
 
 export class UIManager {
@@ -181,9 +182,19 @@ export class UIManager {
     this.stateMachine.setSpeechState(active, paused);
   }
 
+  setPauseReason(reason: PauseReason): void {
+    if (this.destroyed) return;
+    this.stateMachine.setPauseReason(reason);
+  }
+
   addTranscript(event: TranscriptEvent): void {
     if (this.destroyed) return;
     this.transcript?.addTranscript(event);
+  }
+
+  addSystemMessage(text: string): void {
+    if (this.destroyed) return;
+    this.transcript?.addSystemMessage(text);
   }
 
   /**
@@ -279,11 +290,19 @@ export class UIManager {
   }
 
   /**
-   * Set a handler for the panel disconnect/close button.
+   * Set a handler for the panel disconnect/end-session button.
    */
   setDisconnectHandler(handler: () => void): void {
     if (this.destroyed) return;
     this.transcript?.setDisconnectHandler(handler);
+  }
+
+  /**
+   * Set a handler for the panel minimize button.
+   */
+  setMinimizeHandler(handler: () => void): void {
+    if (this.destroyed) return;
+    this.transcript?.setMinimizeHandler(handler);
   }
 
   /**

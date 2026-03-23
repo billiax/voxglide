@@ -84,6 +84,10 @@ vi.mock('../../src/ui/UIManager', () => {
     setAIThinking = vi.fn();
     restoreTranscript = vi.fn();
     setDisconnectHandler = vi.fn();
+    setMinimizeHandler = vi.fn();
+    addSystemMessage = vi.fn();
+    setPauseReason = vi.fn();
+    getStateMachine = vi.fn().mockReturnValue({ getState: () => ({ panelVisible: true }) });
     ensureAttached = vi.fn();
     updateQueue = vi.fn();
     setCancelHandler = vi.fn();
@@ -262,13 +266,14 @@ describe('Text Mode', () => {
       expect(proxySessionInstances[0].config.speechEnabled).toBe(true);
     });
 
-    it('toggle while connected and speech active disconnects', async () => {
+    it('toggle while connected and speech active stops session (panel visible)', async () => {
       await sdk.start();
       proxySessionInstances[0].callbacks.onStatusChange('connected');
       proxySessionInstances[0].callbacks.onSpeechStateChange(true, false, true);
 
       await sdk.toggle();
-      expect(sdk.getConnectionState()).toBe(ConnectionState.DISCONNECTED);
+      // Voice mode with panel visible: one-click stop
+      expect(proxySessionInstances[0].disconnect).toHaveBeenCalled();
     });
 
     it('toggle while connected but speech inactive retries speech', async () => {

@@ -3,7 +3,7 @@ import type { QueueState } from '../ai/types';
 import type { InputMode } from './FloatingButton';
 import { TranscriptStore } from './TranscriptStore';
 import type { StoredTranscriptLine } from './TranscriptStore';
-import { sendIcon, closeIcon, settingsIcon } from './icons';
+import { sendIcon, minimizeIcon, endSessionIcon, settingsIcon } from './icons';
 
 export class TranscriptOverlay {
   private container: HTMLElement;
@@ -17,6 +17,9 @@ export class TranscriptOverlay {
   private inputRow: HTMLElement | null = null;
   private onSendText: ((text: string) => void) | null = null;
   private onDisconnect: (() => void) | null = null;
+  private onMinimize: (() => void) | null = null;
+  private endSessionBtn: HTMLElement | null = null;
+  private truncationEl: HTMLElement | null = null;
   private onCancelTurn: ((turnId: string) => void) | null = null;
   private inputMode: InputMode;
   private toolStatusEl: HTMLElement | null = null;
@@ -28,6 +31,7 @@ export class TranscriptOverlay {
   private settingsViewEl: HTMLElement | null = null;
   private queuePanel: HTMLElement | null = null;
   private queueItems: Map<string, HTMLElement> = new Map();
+  private userInteracting = false;
 
   constructor(parent: HTMLElement, autoHideMs: number, inputMode: InputMode = 'voice') {
     this.autoHideMs = autoHideMs;
@@ -39,6 +43,24 @@ export class TranscriptOverlay {
       this.container.classList.add('text-mode');
     }
     parent.prepend(this.container);
+
+    // Pause auto-hide while user is interacting with the panel (reading/scrolling)
+    this.container.addEventListener('mouseenter', () => {
+      this.userInteracting = true;
+      this.clearAutoHideTimer();
+    });
+    this.container.addEventListener('mouseleave', () => {
+      this.userInteracting = false;
+      if (this.inputMode !== 'text' && this.isVisible()) this.resetAutoHide();
+    });
+    this.container.addEventListener('touchstart', () => {
+      this.userInteracting = true;
+      this.clearAutoHideTimer();
+    }, { passive: true });
+    this.container.addEventListener('touchend', () => {
+      this.userInteracting = false;
+      if (this.inputMode !== 'text' && this.isVisible()) this.resetAutoHide();
+    }, { passive: true });
 
     // Panel header (hidden until connected)
     this.headerEl = document.createElement('div');
@@ -61,14 +83,24 @@ export class TranscriptOverlay {
     this.headerRightEl = document.createElement('div');
     this.headerRightEl.className = 'vsdk-panel-header-right';
 
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'vsdk-panel-close';
-    closeBtn.innerHTML = closeIcon;
-    closeBtn.setAttribute('aria-label', 'Disconnect');
-    closeBtn.addEventListener('click', () => {
+    const minimizeBtn = document.createElement('button');
+    minimizeBtn.className = 'vsdk-panel-minimize';
+    minimizeBtn.innerHTML = minimizeIcon;
+    minimizeBtn.setAttribute('aria-label', 'Minimize');
+    minimizeBtn.addEventListener('click', () => {
+      this.onMinimize?.();
+    });
+
+    this.endSessionBtn = document.createElement('button');
+    this.endSessionBtn.className = 'vsdk-panel-end-session';
+    this.endSessionBtn.innerHTML = endSessionIcon;
+    this.endSessionBtn.setAttribute('aria-label', 'End session');
+    this.endSessionBtn.addEventListener('click', () => {
       this.onDisconnect?.();
     });
-    this.headerRightEl.appendChild(closeBtn);
+
+    this.headerRightEl.appendChild(minimizeBtn);
+    this.headerRightEl.appendChild(this.endSessionBtn);
 
     this.headerEl.appendChild(headerLeft);
     this.headerEl.appendChild(this.headerRightEl);
@@ -120,6 +152,10 @@ export class TranscriptOverlay {
 
   setDisconnectHandler(handler: () => void): void {
     this.onDisconnect = handler;
+  }
+
+  setMinimizeHandler(handler: () => void): void {
+    this.onMinimize = handler;
   }
 
   setHeaderVisible(visible: boolean): void {
@@ -210,6 +246,14 @@ export class TranscriptOverlay {
 
     this.storedLines.push({ speaker: event.speaker, text: event.text });
     TranscriptStore.save(this.storedLines);
+  }
+
+  addSystemMessage(text: string): void {
+    this.container.classList.add('visible');
+    const line = document.createElement('div');
+    line.className = 'vsdk-transcript-line vsdk-msg-system';
+    line.textContent = text;
+    this.appendLine(line);
   }
 
   restoreTranscript(): void {
@@ -387,6 +431,8 @@ export class TranscriptOverlay {
     this.removeToolStatus();
     this.removeThinkingIndicator();
     this.clearQueue();
+    this.truncationEl?.remove();
+    this.truncationEl = null;
     TranscriptStore.clear();
     this.hide();
   }
@@ -413,12 +459,28 @@ export class TranscriptOverlay {
 
   private appendLine(line: HTMLElement): void {
     this.lines.push(line);
+    let removed = false;
     while (this.lines.length > this.maxLines) {
       const old = this.lines.shift();
       old?.remove();
+      removed = true;
+    }
+    if (removed) {
+      this.showTruncationIndicator();
     }
     this.messagesEl.appendChild(line);
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  private showTruncationIndicator(): void {
+    if (!this.truncationEl) {
+      this.truncationEl = document.createElement('div');
+      this.truncationEl.className = 'vsdk-truncation-notice';
+      this.truncationEl.textContent = 'Older messages not shown';
+    }
+    if (this.truncationEl.parentElement !== this.messagesEl) {
+      this.messagesEl.prepend(this.truncationEl);
+    }
   }
 
   setAutoHideEnabled(enabled: boolean): void {
@@ -439,7 +501,7 @@ export class TranscriptOverlay {
 
   private resetAutoHide(): void {
     this.clearAutoHideTimer();
-    if (this.autoHideMs > 0 && this.autoHideEnabled) {
+    if (this.autoHideMs > 0 && this.autoHideEnabled && !this.userInteracting) {
       this.hideTimeout = setTimeout(() => this.hide(), this.autoHideMs);
     }
   }
