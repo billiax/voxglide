@@ -56,9 +56,18 @@ vi.mock('../../src/ui/UIManager', () => {
     ensureAttached = vi.fn();
     updateQueue = vi.fn();
     setCancelHandler = vi.fn();
-    showToolStatus = vi.fn();
-    removeToolStatus = vi.fn();
-    constructor(public config: any, public onToggle: any) {}
+    setToolLoopStatus = vi.fn();
+    showBuildButton = vi.fn();
+    hideBuildButton = vi.fn();
+    renderBuildButton = vi.fn();
+    setTranscriptBuildMode = vi.fn();
+    addBuildSystemMessage = vi.fn();
+    showRefreshButton = vi.fn();
+    hideRefreshButton = vi.fn();
+    setRefreshHandler = vi.fn();
+    isPanelVisible = vi.fn().mockReturnValue(false);
+    addPendingTool = vi.fn();
+    constructor(public config: any, public onToggle: any, public onSendText?: any, public inputMode?: string, public onBuildToggle?: any) {}
   }
   return { UIManager: MockUIManager };
 });

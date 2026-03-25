@@ -584,41 +584,42 @@ describe('UIManager', () => {
     });
   });
 
-  describe('showToolStatus() / removeToolStatus()', () => {
-    it('shows tool status in transcript', () => {
+  describe('setToolLoopStatus()', () => {
+    it('shows activity bubble in transcript', () => {
       const ui = new UIManager({}, onToggle);
       const shadow = ui.getHost().shadowRoot!;
 
-      ui.showToolStatus('fillField');
-      const status = shadow.querySelector('.vsdk-tool-status');
-      expect(status).not.toBeNull();
-      expect(status!.textContent).toBe('fillField...');
+      ui.setToolLoopStatus('Running page snapshot...');
+      const activity = shadow.querySelector('.vsdk-activity');
+      expect(activity).not.toBeNull();
+      const label = shadow.querySelector('.vsdk-activity-label');
+      expect(label!.textContent).toBe('Running page snapshot...');
 
       ui.destroy();
     });
 
-    it('removes tool status from transcript', () => {
+    it('removes activity bubble when null', () => {
       const ui = new UIManager({}, onToggle);
       const shadow = ui.getHost().shadowRoot!;
 
-      ui.showToolStatus('fillField');
-      expect(shadow.querySelector('.vsdk-tool-status')).not.toBeNull();
+      ui.setToolLoopStatus('Processing...');
+      expect(shadow.querySelector('.vsdk-activity')).not.toBeNull();
 
-      ui.removeToolStatus();
-      expect(shadow.querySelector('.vsdk-tool-status')).toBeNull();
+      ui.setToolLoopStatus(null);
+      expect(shadow.querySelector('.vsdk-activity')).toBeNull();
 
       ui.destroy();
     });
 
-    it('replaces existing tool status', () => {
+    it('updates in place instead of stacking', () => {
       const ui = new UIManager({}, onToggle);
       const shadow = ui.getHost().shadowRoot!;
 
-      ui.showToolStatus('fillField');
-      ui.showToolStatus('clickElement');
-      const statuses = shadow.querySelectorAll('.vsdk-tool-status');
-      expect(statuses.length).toBe(1);
-      expect(statuses[0].textContent).toBe('clickElement...');
+      ui.setToolLoopStatus('Running page snapshot...');
+      ui.setToolLoopStatus('Running evaluate js...');
+      const activities = shadow.querySelectorAll('.vsdk-activity');
+      expect(activities.length).toBe(1);
+      expect(shadow.querySelector('.vsdk-activity-label')!.textContent).toBe('Running evaluate js...');
 
       ui.destroy();
     });
@@ -626,32 +627,32 @@ describe('UIManager', () => {
     it('does nothing after destroy', () => {
       const ui = new UIManager({}, onToggle);
       ui.destroy();
-      ui.showToolStatus('test');
-      ui.removeToolStatus();
+      ui.setToolLoopStatus('test');
+      ui.setToolLoopStatus(null);
     });
   });
 
   describe('setAIThinking()', () => {
-    it('shows thinking indicator when set to true', () => {
+    it('shows activity bubble when set to true', () => {
       const ui = new UIManager({}, onToggle);
       const shadow = ui.getHost().shadowRoot!;
 
       ui.setAIThinking(true);
-      const thinking = shadow.querySelector('.vsdk-thinking');
-      expect(thinking).not.toBeNull();
+      const activity = shadow.querySelector('.vsdk-activity');
+      expect(activity).not.toBeNull();
 
       ui.destroy();
     });
 
-    it('removes thinking indicator when set to false', () => {
+    it('removes activity bubble when set to false', () => {
       const ui = new UIManager({}, onToggle);
       const shadow = ui.getHost().shadowRoot!;
 
       ui.setAIThinking(true);
-      expect(shadow.querySelector('.vsdk-thinking')).not.toBeNull();
+      expect(shadow.querySelector('.vsdk-activity')).not.toBeNull();
 
       ui.setAIThinking(false);
-      expect(shadow.querySelector('.vsdk-thinking')).toBeNull();
+      expect(shadow.querySelector('.vsdk-activity')).toBeNull();
 
       ui.destroy();
     });
@@ -817,8 +818,8 @@ describe('UIManager', () => {
       ui.hideTranscript();
       ui.toggleTranscript();
       ui.clearTranscript();
-      ui.showToolStatus('test');
-      ui.removeToolStatus();
+      ui.setToolLoopStatus('test');
+      ui.setToolLoopStatus(null);
       ui.setAIThinking(true);
       ui.focusInput();
       ui.setAutoHideEnabled(false);
@@ -1018,10 +1019,10 @@ describe('UIManager', () => {
       const shadow = ui.getHost().shadowRoot!;
 
       ui.setAIThinking(true);
-      expect(shadow.querySelector('.vsdk-thinking')).not.toBeNull();
+      expect(shadow.querySelector('.vsdk-activity')).not.toBeNull();
 
       ui.setAIThinking(false);
-      expect(shadow.querySelector('.vsdk-thinking')).toBeNull();
+      expect(shadow.querySelector('.vsdk-activity')).toBeNull();
 
       ui.destroy();
     });
