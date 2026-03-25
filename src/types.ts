@@ -31,6 +31,8 @@ export interface VoiceSDKConfig {
   workflows?: WorkflowDefinition[];
   /** Enable voice accessibility mode (ARIA live regions, keyboard shortcuts, high contrast) */
   accessibility?: boolean | AccessibilityConfig;
+  /** Build mode configuration for AI-powered tool generation via Claude Code API */
+  buildMode?: import('./build/types').BuildModeConfig;
 }
 
 export interface AccessibilityConfig {

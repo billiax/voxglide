@@ -5,6 +5,8 @@ import { ConnectionState, DEFAULT_UI } from '../constants';
 import { buildStyles } from './styles';
 import { resolveTheme } from './themes';
 import { FloatingButton } from './FloatingButton';
+import { BuildModeButton } from './BuildModeButton';
+import type { BuildButtonState } from './BuildModeButton';
 import { TranscriptOverlay } from './TranscriptOverlay';
 import { SettingsPanel } from './SettingsPanel';
 import { UIStateMachine } from './UIStateMachine';
@@ -26,12 +28,16 @@ export class UIManager {
   private destroyed = false;
   private hostGuardInterval: ReturnType<typeof setInterval> | null = null;
   private bodyObserver: MutationObserver | null = null;
+  private buildButton: BuildModeButton | null = null;
+  private buttonRow: HTMLElement;
+  private onBuildToggle: (() => void) | null = null;
 
   constructor(
     config: UIConfig = {},
     onToggle: () => void,
     onSendText?: (text: string) => void,
     inputMode: InputMode = 'voice',
+    onBuildToggle?: () => void,
   ) {
     this.config = { ...DEFAULT_UI, ...config };
     this.inputMode = inputMode;
@@ -91,8 +97,16 @@ export class UIManager {
       this.transcript.setSettingsClickHandler(() => this.toggleSettings());
     }
 
-    // Create floating button
-    this.button = new FloatingButton(this.wrapper, onToggle, inputMode);
+    // Create button row container (holds main button + optional build button)
+    this.buttonRow = document.createElement('div');
+    this.buttonRow.className = 'vsdk-button-row';
+    this.wrapper.appendChild(this.buttonRow);
+
+    // Create floating button inside the row
+    this.button = new FloatingButton(this.buttonRow, onToggle, inputMode);
+
+    // Store build toggle handler for later
+    this.onBuildToggle = onBuildToggle ?? null;
 
     // Subscribe button to state changes
     this.stateMachine.subscribe((current) => {
@@ -197,21 +211,70 @@ export class UIManager {
     this.transcript?.addSystemMessage(text);
   }
 
-  /**
-   * Show a tool execution status in the transcript.
-   */
-  showToolStatus(toolName: string): void {
-    if (this.destroyed) return;
-    this.transcript?.showToolStatus(toolName);
+  isPanelVisible(): boolean {
+    return this.stateMachine.getState().panelVisible;
   }
 
-  /**
-   * Remove the tool execution status from the transcript.
-   */
-  removeToolStatus(): void {
-    if (this.destroyed) return;
-    this.transcript?.removeToolStatus();
+  showBuildButton(): void {
+    if (this.destroyed || this.buildButton) return;
+    if (!this.onBuildToggle) return;
+    this.buildButton = new BuildModeButton(this.buttonRow, this.onBuildToggle);
   }
+
+  hideBuildButton(): void {
+    this.buildButton?.destroy();
+    this.buildButton = null;
+  }
+
+  renderBuildButton(state: BuildButtonState): void {
+    this.buildButton?.render(state);
+  }
+
+  addBuildSystemMessage(text: string): void {
+    if (this.destroyed) return;
+    this.transcript?.addBuildSystemMessage(text);
+  }
+
+  setTranscriptBuildMode(active: boolean, title: string): void {
+    if (this.destroyed) return;
+    this.transcript?.setPanelTitle(title);
+    this.transcript?.setBuildModeDot(active);
+    if (active) {
+      this.transcript?.setBuildUrl(window.location.href);
+    } else {
+      this.transcript?.setBuildUrl(null);
+    }
+  }
+
+  showRefreshButton(): void {
+    if (this.destroyed) return;
+    this.transcript?.showRefreshButton();
+  }
+
+  hideRefreshButton(): void {
+    if (this.destroyed) return;
+    this.transcript?.hideRefreshButton();
+  }
+
+  setRefreshHandler(handler: () => void): void {
+    if (this.destroyed) return;
+    this.transcript?.setRefreshHandler(handler);
+  }
+
+  setToolLoopStatus(text: string | null): void {
+    if (this.destroyed) return;
+    this.transcript?.setToolLoopStatus(text);
+  }
+
+  addPendingTool(
+    tool: { name: string; code: string },
+    onAccept: () => void,
+    onReject: () => void,
+  ): void {
+    if (this.destroyed) return;
+    this.transcript?.addPendingTool(tool, onAccept, onReject);
+  }
+
 
   showTranscript(): void {
     if (this.destroyed) return;
@@ -391,6 +454,8 @@ export class UIManager {
     this.stateMachine.markDestroyed();
     this.settingsPanel?.destroy();
     this.settingsPanel = null;
+    this.buildButton?.destroy();
+    this.buildButton = null;
     this.button.destroy();
     this.transcript?.destroy();
     this.host.remove();

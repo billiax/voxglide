@@ -13,6 +13,7 @@ export interface UIState {
   speechActive: boolean;
   speechPaused: boolean;
   pauseReason: PauseReason;
+  buildMode: boolean;
   destroyed: boolean;
 }
 
@@ -32,6 +33,7 @@ export class UIStateMachine {
       speechActive: false,
       speechPaused: false,
       pauseReason: null,
+      buildMode: false,
       destroyed: false,
     };
   }
@@ -112,6 +114,14 @@ export class UIStateMachine {
     if (this.state.destroyed) return;
     const previous = { ...this.state };
     this.state = { ...this.state, activeTool };
+    this.notify(previous);
+  }
+
+  setBuildMode(active: boolean): void {
+    if (this.state.destroyed) return;
+    if (this.state.buildMode === active) return;
+    const previous = { ...this.state };
+    this.state = { ...this.state, buildMode: active };
     this.notify(previous);
   }
 

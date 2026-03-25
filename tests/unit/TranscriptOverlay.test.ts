@@ -128,13 +128,13 @@ describe('TranscriptOverlay queue panel', () => {
     // Show thinking indicator
     overlay.showThinkingIndicator();
     const container = parent.querySelector('.vsdk-transcript')!;
-    expect(container.querySelector('.vsdk-thinking')).not.toBeNull();
+    expect(container.querySelector('.vsdk-activity')).not.toBeNull();
 
     // Update queue with active turn — should remove thinking
     overlay.updateQueue({
       active: { turnId: 't1', text: 'hello', status: 'processing' },
       queued: [],
     });
-    expect(container.querySelector('.vsdk-thinking')).toBeNull();
+    expect(container.querySelector('.vsdk-activity')).toBeNull();
   });
 });

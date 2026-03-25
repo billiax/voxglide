@@ -3,7 +3,10 @@ import type { QueueState } from '../ai/types';
 import type { InputMode } from './FloatingButton';
 import { TranscriptStore } from './TranscriptStore';
 import type { StoredTranscriptLine } from './TranscriptStore';
-import { sendIcon, minimizeIcon, endSessionIcon, settingsIcon } from './icons';
+import {
+  sendIcon, minimizeIcon, endSessionIcon, settingsIcon, refreshIcon,
+  gearSmallIcon, checkSmallIcon, xSmallIcon, codeIcon,
+} from './icons';
 
 export class TranscriptOverlay {
   private container: HTMLElement;
@@ -22,12 +25,14 @@ export class TranscriptOverlay {
   private truncationEl: HTMLElement | null = null;
   private onCancelTurn: ((turnId: string) => void) | null = null;
   private inputMode: InputMode;
-  private toolStatusEl: HTMLElement | null = null;
-  private thinkingEl: HTMLElement | null = null;
+  private activityEl: HTMLElement | null = null;
+  private activityStage: 'thinking' | 'executing' | 'processing' | null = null;
   private headerEl: HTMLElement | null = null;
   private headerRightEl: HTMLElement | null = null;
   private headerDotEl: HTMLElement | null = null;
   private hasSettings = false;
+  private refreshBtn: HTMLElement | null = null;
+  private onRefresh: (() => void) | null = null;
   private settingsViewEl: HTMLElement | null = null;
   private queuePanel: HTMLElement | null = null;
   private queueItems: Map<string, HTMLElement> = new Map();
@@ -99,6 +104,17 @@ export class TranscriptOverlay {
       this.onDisconnect?.();
     });
 
+    // Refresh button (hidden by default, shown in build mode)
+    this.refreshBtn = document.createElement('button');
+    this.refreshBtn.className = 'vsdk-panel-refresh';
+    this.refreshBtn.innerHTML = refreshIcon; // trusted SVG constant from icons.ts
+    this.refreshBtn.setAttribute('aria-label', 'New build session');
+    this.refreshBtn.style.display = 'none';
+    this.refreshBtn.addEventListener('click', () => {
+      this.onRefresh?.();
+    });
+
+    this.headerRightEl.appendChild(this.refreshBtn);
     this.headerRightEl.appendChild(minimizeBtn);
     this.headerRightEl.appendChild(this.endSessionBtn);
 
@@ -206,7 +222,7 @@ export class TranscriptOverlay {
   }
 
   addTranscript(event: TranscriptEvent): void {
-    this.removeThinkingIndicator();
+    this.removeActivity();
 
     this.container.classList.add('visible');
     if (this.inputMode !== 'text') {
@@ -256,6 +272,136 @@ export class TranscriptOverlay {
     this.appendLine(line);
   }
 
+  addBuildSystemMessage(text: string): void {
+    const line = document.createElement('div');
+    line.className = 'vsdk-transcript-line vsdk-msg-build';
+    line.textContent = text;
+    this.appendLine(line);
+    this.container.classList.add('visible');
+  }
+
+  /** Updates the unified activity bubble with the current tool loop stage. */
+  setToolLoopStatus(text: string | null): void {
+    if (!text) {
+      this.removeActivity();
+      return;
+    }
+
+    // Determine stage from text content
+    const isProcessing = text.toLowerCase().startsWith('processing');
+    const stage: 'executing' | 'processing' = isProcessing ? 'processing' : 'executing';
+
+    this.ensureActivity(stage);
+    const label = this.activityEl?.querySelector('.vsdk-activity-label');
+    if (label) label.textContent = text;
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  setPanelTitle(title: string): void {
+    const titleEl = this.container.querySelector('.vsdk-panel-title');
+    if (titleEl) titleEl.textContent = title;
+  }
+
+  setBuildModeDot(active: boolean): void {
+    this.headerDotEl?.classList.toggle('vsdk-build-mode', active);
+    this.container.classList.toggle('vsdk-build-panel', active);
+  }
+
+  /** Show truncated page URL in the header (build mode context). */
+  setBuildUrl(url: string | null): void {
+    let badge = this.headerEl?.querySelector('.vsdk-build-url') as HTMLElement | null;
+    if (!url) {
+      badge?.remove();
+      return;
+    }
+    // Show just the pathname
+    let display: string;
+    try { display = new URL(url).pathname; } catch { display = url; }
+    if (display.length > 28) display = display.slice(0, 28) + '\u2026';
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'vsdk-build-url';
+      this.headerEl?.querySelector('.vsdk-panel-header-left')?.appendChild(badge);
+    }
+    badge.textContent = display;
+    badge.title = url;
+  }
+
+  showRefreshButton(): void {
+    if (this.refreshBtn) this.refreshBtn.style.display = '';
+  }
+
+  hideRefreshButton(): void {
+    if (this.refreshBtn) this.refreshBtn.style.display = 'none';
+  }
+
+  setRefreshHandler(handler: () => void): void {
+    this.onRefresh = handler;
+  }
+
+  addPendingTool(
+    tool: { name: string; code: string },
+    onAccept: () => void,
+    onReject: () => void,
+  ): void {
+    const el = document.createElement('div');
+    el.className = 'vsdk-pending-tool pending';
+    el.setAttribute('data-tool-name', tool.name);
+
+    // Icon + name row
+    const header = document.createElement('div');
+    header.className = 'vsdk-pending-tool-header';
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'vsdk-pending-tool-title-row';
+    titleRow.innerHTML = codeIcon;
+    const nameEl = document.createElement('span');
+    nameEl.className = 'vsdk-pending-tool-name';
+    nameEl.textContent = tool.name;
+    titleRow.appendChild(nameEl);
+    header.appendChild(titleRow);
+
+    // Code preview (first 3 meaningful lines)
+    const codeEl = document.createElement('pre');
+    codeEl.className = 'vsdk-pending-tool-code';
+    const lines = tool.code.split('\n').filter(l => l.trim()).slice(0, 3);
+    codeEl.textContent = lines.join('\n') + (tool.code.split('\n').filter(l => l.trim()).length > 3 ? '\n...' : '');
+
+    // Action buttons
+    const actions = document.createElement('div');
+    actions.className = 'vsdk-pending-tool-actions';
+
+    const acceptBtn = document.createElement('button');
+    acceptBtn.className = 'vsdk-pending-tool-accept';
+    acceptBtn.innerHTML = checkSmallIcon + ' Accept';
+    acceptBtn.addEventListener('click', () => {
+      onAccept();
+      el.classList.add('accepted');
+      el.classList.remove('pending');
+      actions.remove();
+    });
+
+    const rejectBtn = document.createElement('button');
+    rejectBtn.className = 'vsdk-pending-tool-reject';
+    rejectBtn.innerHTML = xSmallIcon + ' Reject';
+    rejectBtn.addEventListener('click', () => {
+      onReject();
+      el.classList.add('rejected');
+      el.classList.remove('pending');
+      actions.remove();
+    });
+
+    actions.appendChild(rejectBtn);
+    actions.appendChild(acceptBtn);
+
+    el.appendChild(header);
+    el.appendChild(codeEl);
+    el.appendChild(actions);
+
+    this.appendLine(el);
+    this.container.classList.add('visible');
+  }
+
   restoreTranscript(): void {
     const stored = TranscriptStore.load();
     if (stored.length === 0) return;
@@ -270,35 +416,53 @@ export class TranscriptOverlay {
     this.container.classList.add('visible');
   }
 
-  showToolStatus(toolName: string): void {
-    this.removeToolStatus();
-    this.toolStatusEl = document.createElement('div');
-    this.toolStatusEl.className = 'vsdk-tool-status';
-    this.toolStatusEl.textContent = `${toolName}...`;
-    this.messagesEl.appendChild(this.toolStatusEl);
-    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-  }
-
-  removeToolStatus(): void {
-    if (this.toolStatusEl) {
-      this.toolStatusEl.remove();
-      this.toolStatusEl = null;
-    }
-  }
-
   showThinkingIndicator(): void {
-    this.removeThinkingIndicator();
-    this.thinkingEl = document.createElement('div');
-    this.thinkingEl.className = 'vsdk-thinking';
-    this.thinkingEl.innerHTML = '<span></span><span></span><span></span>';
-    this.messagesEl.appendChild(this.thinkingEl);
-    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    this.ensureActivity('thinking');
   }
 
   removeThinkingIndicator(): void {
-    if (this.thinkingEl) {
-      this.thinkingEl.remove();
-      this.thinkingEl = null;
+    // Only remove if still in thinking stage — tool execution takes over
+    if (this.activityStage === 'thinking') {
+      this.removeActivity();
+    }
+  }
+
+  // ── Unified activity bubble ──
+
+  private ensureActivity(stage: 'thinking' | 'executing' | 'processing'): void {
+    if (!this.activityEl) {
+      this.activityEl = document.createElement('div');
+      this.activityEl.className = 'vsdk-activity';
+      this.messagesEl.appendChild(this.activityEl);
+    }
+
+    // Skip DOM rebuild if stage hasn't changed
+    if (this.activityStage === stage) return;
+
+    this.activityStage = stage;
+    this.activityEl.className = `vsdk-activity vsdk-activity-${stage}`;
+
+    if (stage === 'thinking') {
+      this.activityEl.innerHTML =
+        '<div class="vsdk-activity-dots"><span></span><span></span><span></span></div>';
+    } else {
+      const icon = stage === 'executing' ? gearSmallIcon : gearSmallIcon;
+      this.activityEl.innerHTML =
+        `<div class="vsdk-activity-inner">` +
+        `<span class="vsdk-activity-icon">${icon}</span>` +
+        `<span class="vsdk-activity-label"></span>` +
+        `</div>` +
+        `<div class="vsdk-activity-shimmer"></div>`;
+    }
+
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  private removeActivity(): void {
+    if (this.activityEl) {
+      this.activityEl.remove();
+      this.activityEl = null;
+      this.activityStage = null;
     }
   }
 
@@ -321,7 +485,7 @@ export class TranscriptOverlay {
       return;
     }
 
-    if (queue.active) this.removeThinkingIndicator();
+    if (queue.active) this.removeActivity();
 
     if (!this.queuePanel) {
       this.queuePanel = document.createElement('div');
@@ -428,8 +592,7 @@ export class TranscriptOverlay {
     this.lines.forEach((l) => l.remove());
     this.lines = [];
     this.storedLines = [];
-    this.removeToolStatus();
-    this.removeThinkingIndicator();
+    this.removeActivity();
     this.clearQueue();
     this.truncationEl?.remove();
     this.truncationEl = null;
@@ -508,7 +671,7 @@ export class TranscriptOverlay {
 
   destroy(): void {
     this.clearAutoHideTimer();
-    this.removeThinkingIndicator();
+    this.removeActivity();
     this.clearQueue();
     this.hideSettingsView();
     this.container.remove();

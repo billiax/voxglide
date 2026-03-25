@@ -1,4 +1,5 @@
 import { SpeechCapture } from './SpeechCapture';
+import { captureScreenshot } from '../utils/screenshot';
 import type { ProxySessionConfig, ProxySessionCallbacks, DebugEvent } from './types';
 
 /**
@@ -194,42 +195,12 @@ export class ProxySession {
   }
 
   private async doScreenshotCapture(requestId?: string): Promise<void> {
-    try {
-      const html2canvas = await this.loadHtml2Canvas();
-      if (!html2canvas) {
-        if (requestId) {
-          this.send({ type: 'screenshot.error', error: 'Failed to load screenshot library', requestId });
-        }
-        return;
-      }
-      const canvas = await html2canvas(document.body, {
-        logging: false,
-        useCORS: true,
-        allowTaint: true,
-        scale: window.devicePixelRatio > 1 ? 0.5 : 0.75,
-        windowWidth: Math.min(document.documentElement.clientWidth, 1440),
-        windowHeight: Math.min(document.documentElement.clientHeight, 900),
-      });
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-      const base64 = dataUrl.split(',')[1];
+    const base64 = await captureScreenshot();
+    if (base64) {
       this.send({ type: 'screenshot', image: base64, url: window.location.href, requestId });
-    } catch (err: any) {
-      if (requestId) {
-        this.send({ type: 'screenshot.error', error: err.message || 'Screenshot capture failed', requestId });
-      }
+    } else if (requestId) {
+      this.send({ type: 'screenshot.error', error: 'Screenshot capture failed', requestId });
     }
-  }
-
-  private async loadHtml2Canvas(): Promise<any> {
-    if ((window as any).html2canvas) return (window as any).html2canvas;
-
-    return new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-      script.onload = () => resolve((window as any).html2canvas);
-      script.onerror = () => resolve(null);
-      document.head.appendChild(script);
-    });
   }
 
   private notifySpeechState(): void {

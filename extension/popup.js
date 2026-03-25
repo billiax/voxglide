@@ -28,6 +28,19 @@ let uiTheme = 'auto';
 let uiAccentColor = '#2563eb';
 let uiSettingsOpen = false;
 
+// Build Mode
+const buildModeToggle = document.getElementById('buildModeToggle');
+const buildModeArrow = document.getElementById('buildModeArrow');
+const buildModeBody = document.getElementById('buildModeBody');
+const buildModeEnabled = document.getElementById('buildModeEnabled');
+const buildWorkspacePreview = document.getElementById('buildWorkspacePreview');
+const buildModeFields = document.getElementById('buildModeFields');
+const buildApiUrl = document.getElementById('buildApiUrl');
+const buildApiKey = document.getElementById('buildApiKey');
+const toggleBuildModeBtn = document.getElementById('toggleBuildMode');
+let buildModeOpen = false;
+let deviceId = '';
+
 // --- Option pill toggle ---
 
 document.querySelectorAll('.option-pill').forEach(pill => {
@@ -88,6 +101,42 @@ accentColorInput.addEventListener('input', () => {
 // Offset
 offsetXInput.addEventListener('input', () => { saveAll(); updatePreview(); });
 offsetYInput.addEventListener('input', () => { saveAll(); updatePreview(); });
+
+// --- Build Mode toggle ---
+
+buildModeToggle.addEventListener('click', () => {
+  buildModeOpen = !buildModeOpen;
+  buildModeBody.style.display = buildModeOpen ? '' : 'none';
+  buildModeArrow.classList.toggle('open', buildModeOpen);
+  saveAll();
+});
+
+buildModeEnabled.addEventListener('change', () => {
+  buildModeFields.style.display = buildModeEnabled.checked ? '' : 'none';
+  toggleBuildModeBtn.style.display = buildModeEnabled.checked ? '' : 'none';
+  saveAll();
+  updatePreview();
+});
+
+buildApiUrl.addEventListener('input', () => { saveAll(); updatePreview(); });
+buildApiKey.addEventListener('input', () => { saveAll(); updatePreview(); });
+
+toggleBuildModeBtn.addEventListener('click', () => {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (!tabs[0]) return;
+    chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      world: 'MAIN',
+      func: () => {
+        const instance = window.__voxglideInstance;
+        if (instance && typeof instance.toggleBuildMode === 'function') {
+          instance.toggleBuildMode();
+        }
+      },
+    });
+    toggleBuildModeBtn.classList.toggle('active');
+  });
+});
 
 // --- URL helpers ---
 
@@ -150,6 +199,14 @@ function getInitCode(parsed, options) {
     lines.push('  ui: {\n' + uiLines.join(',\n') + '\n  }');
   }
 
+  if (options.buildMode && options.buildApiUrl) {
+    const bmLines = [];
+    bmLines.push(`    apiUrl: '${options.buildApiUrl}'`);
+    bmLines.push(`    apiKey: '${options.buildApiKey}'`);
+    bmLines.push(`    workspace: location.host + '-${deviceId}'`);
+    lines.push('  buildMode: {\n' + bmLines.join(',\n') + '\n  }');
+  }
+
   return `new VoiceSDK({\n${lines.join(',\n')}\n});`;
 }
 
@@ -165,6 +222,9 @@ function getOptions() {
     accentColor: uiAccentColor,
     offsetX: parseInt(offsetXInput.value, 10) || 20,
     offsetY: parseInt(offsetYInput.value, 10) || 20,
+    buildMode: buildModeEnabled.checked,
+    buildApiUrl: buildApiUrl.value.trim(),
+    buildApiKey: buildApiKey.value.trim(),
   };
 }
 
@@ -206,6 +266,7 @@ function escapeHtml(s) {
 const STORAGE_KEYS = [
   'serverUrl', 'optAutoContext', 'optTts', 'optDebug', 'context', 'autoInject',
   'uiPosition', 'uiSize', 'uiTheme', 'uiAccentColor', 'uiOffsetX', 'uiOffsetY', 'uiSettingsOpen',
+  'buildModeEnabled', 'buildApiUrl', 'buildApiKey', 'buildModeOpen',
 ];
 
 function saveAll() {
@@ -223,6 +284,10 @@ function saveAll() {
     uiOffsetX: parseInt(offsetXInput.value, 10) || 20,
     uiOffsetY: parseInt(offsetYInput.value, 10) || 20,
     uiSettingsOpen: uiSettingsOpen,
+    buildModeEnabled: buildModeEnabled.checked,
+    buildApiUrl: buildApiUrl.value,
+    buildApiKey: buildApiKey.value,
+    buildModeOpen: buildModeOpen,
   });
 }
 
@@ -263,10 +328,53 @@ chrome.storage.local.get(STORAGE_KEYS, (data) => {
   offsetYInput.value = data.uiOffsetY !== undefined ? data.uiOffsetY : 20;
   uiSettingsOpen = !!data.uiSettingsOpen;
   applyUiState();
+  // Build mode state
+  buildModeEnabled.checked = !!data.buildModeEnabled;
+  buildApiUrl.value = data.buildApiUrl || '';
+  buildApiKey.value = data.buildApiKey || '';
+  buildModeOpen = !!data.buildModeOpen;
+  buildModeBody.style.display = buildModeOpen ? '' : 'none';
+  buildModeArrow.classList.toggle('open', buildModeOpen);
+  buildModeFields.style.display = buildModeEnabled.checked ? '' : 'none';
+  toggleBuildModeBtn.style.display = buildModeEnabled.checked ? '' : 'none';
   // Sync option pill states after loading
   document.querySelectorAll('.option-pill').forEach(pill => {
     const checkbox = pill.querySelector('input[type="checkbox"]');
     pill.classList.toggle('active', checkbox.checked);
+  });
+  updatePreview();
+
+  // Sync build mode toggle button visual with page's actual build mode state
+  if (data.buildModeEnabled) {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs[0]) return;
+      chrome.scripting.executeScript({
+        target: { tabId: tabs[0].id },
+        world: 'MAIN',
+        func: () => window.__voxglideInstance?.isBuildModeActive() ?? false,
+      }).then(results => {
+        if (results?.[0]?.result) {
+          toggleBuildModeBtn.classList.add('active');
+        }
+      }).catch(() => {});
+    });
+  }
+});
+
+// --- Workspace preview (host + unique device ID) ---
+chrome.storage.local.get('deviceId', (d) => {
+  deviceId = d.deviceId;
+  if (!deviceId) {
+    deviceId = crypto.randomUUID().slice(0, 8);
+    chrome.storage.local.set({ deviceId });
+  }
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (tabs[0]?.url) {
+      try {
+        const host = new URL(tabs[0].url).host;
+        buildWorkspacePreview.textContent = `${host}-${deviceId}`;
+      } catch { /* ignore */ }
+    }
   });
   updatePreview();
 });

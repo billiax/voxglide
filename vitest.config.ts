@@ -1,6 +1,21 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig, type Plugin } from 'vitest/config';
+import { readFileSync } from 'fs';
+
+/** Import .md files as string default exports (mirrors rollup mdPlugin). */
+function mdPlugin(): Plugin {
+  return {
+    name: 'md',
+    transform(_code, id) {
+      if (id.endsWith('.md')) {
+        const content = readFileSync(id, 'utf-8');
+        return { code: `export default ${JSON.stringify(content)};`, map: null };
+      }
+    },
+  };
+}
 
 export default defineConfig({
+  plugins: [mdPlugin()],
   test: {
     environment: 'jsdom',
     setupFiles: ['./tests/setup.ts'],

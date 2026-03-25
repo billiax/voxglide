@@ -37,8 +37,11 @@ pnpm-lock.yaml
 
 # Claude Code
 .claude/worktrees/
+.claude/settings.local.json
 
 # Misc
 .mcp.json
 .playwright-mcp/
 temp/
+
+server/functions/

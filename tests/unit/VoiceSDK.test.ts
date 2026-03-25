@@ -69,8 +69,8 @@ const uiInstances: Array<{
   ensureAttached: ReturnType<typeof vi.fn>;
   updateQueue: ReturnType<typeof vi.fn>;
   setCancelHandler: ReturnType<typeof vi.fn>;
-  showToolStatus: ReturnType<typeof vi.fn>;
-  removeToolStatus: ReturnType<typeof vi.fn>;
+  setToolLoopStatus: ReturnType<typeof vi.fn>;
+  setToolLoopStatus: ReturnType<typeof vi.fn>;
   focusInput: ReturnType<typeof vi.fn>;
   getHost: ReturnType<typeof vi.fn>;
   addSystemMessage: ReturnType<typeof vi.fn>;
@@ -95,14 +95,23 @@ vi.mock('../../src/ui/UIManager', () => {
     ensureAttached = vi.fn();
     updateQueue = vi.fn();
     setCancelHandler = vi.fn();
-    showToolStatus = vi.fn();
-    removeToolStatus = vi.fn();
+    setToolLoopStatus = vi.fn();
     focusInput = vi.fn();
     getHost = vi.fn().mockReturnValue(document.createElement('div'));
     addSystemMessage = vi.fn();
     setPauseReason = vi.fn();
     getStateMachine = vi.fn().mockReturnValue({ getState: () => ({ panelVisible: true }) });
-    constructor(public config: any, public onToggle: any, public onSendText?: any, public inputMode?: string) {
+    showBuildButton = vi.fn();
+    hideBuildButton = vi.fn();
+    renderBuildButton = vi.fn();
+    setTranscriptBuildMode = vi.fn();
+    addBuildSystemMessage = vi.fn();
+    showRefreshButton = vi.fn();
+    hideRefreshButton = vi.fn();
+    setRefreshHandler = vi.fn();
+    isPanelVisible = vi.fn().mockReturnValue(false);
+    addPendingTool = vi.fn();
+    constructor(public config: any, public onToggle: any, public onSendText?: any, public inputMode?: string, public onBuildToggle?: any) {
       uiInstances.push(this as any);
     }
   }
@@ -168,6 +177,18 @@ vi.mock('../../src/actions/NbtFunctionsProvider', () => {
     constructor(public onChange: any, public debug: any) {}
   }
   return { NbtFunctionsProvider: MockNbtFunctionsProvider };
+});
+
+// FunctionLoader: mocked because it makes HTTP requests to the server
+vi.mock('../../src/actions/FunctionLoader', () => {
+  class MockFunctionLoader {
+    load = vi.fn().mockResolvedValue([]);
+    reload = vi.fn().mockResolvedValue([]);
+    ready = vi.fn().mockResolvedValue(undefined);
+    isLoaded = vi.fn().mockReturnValue(false);
+    constructor(public serverUrl: string, public debug?: boolean) {}
+  }
+  return { FunctionLoader: MockFunctionLoader };
 });
 
 // ── These run REAL (not mocked): ──
@@ -746,10 +767,13 @@ describe('VoiceSDK', () => {
       expect(provider.destroy).toHaveBeenCalled();
     });
 
-    it('syncs nbt_functions on SPA navigation', () => {
+    it('syncs nbt_functions on SPA navigation', async () => {
       const navObserver = (sdk as any).navigationObserver;
       const provider = (sdk as any).nbtFunctionsProvider;
+      const loader = (sdk as any).functionLoader;
       navObserver.onNavigate({ from: '/a', to: '/b', type: 'pushState' });
+      // sync happens after functionLoader.reload() resolves
+      await loader.reload.mock.results[0]?.value;
       expect(provider.sync).toHaveBeenCalled();
     });
   });
@@ -886,8 +910,8 @@ describe('VoiceSDK', () => {
       const fc: FunctionCall = { id: 'fc-7', name: 'clickElement', args: { description: 'btn' } };
       await lastSession().callbacks.onToolCall(fc);
 
-      expect(lastUI().showToolStatus).toHaveBeenCalledWith('clickElement');
-      expect(lastUI().removeToolStatus).toHaveBeenCalled();
+      expect(lastUI().setToolLoopStatus).toHaveBeenCalledWith('clickElement');
+      expect(lastUI().setToolLoopStatus).toHaveBeenCalled();
     });
 
     it('handles handler errors gracefully via real ActionRouter', async () => {
