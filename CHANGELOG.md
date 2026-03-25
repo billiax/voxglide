@@ -1,3 +1,12 @@
+# [1.1.0](https://github.com/billiax/voxglide/compare/v1.0.1...v1.1.0) (2026-03-25)
+
+
+### Features
+
+* **build:** add build mode with tool generation, browser introspection, and UI ([639ce01](https://github.com/billiax/voxglide/commit/639ce01b55abcf5cca4cc2c5914420b436f98d4d))
+* **extension:** add build mode settings, CORS bridge, and workspace auto-generation ([88de623](https://github.com/billiax/voxglide/commit/88de6235f3a52edc579fc244fdbccb5a171e71dd))
+* **server:** add functions CRUD API, URL matching, and generated tool serving ([3ba3630](https://github.com/billiax/voxglide/commit/3ba36306fc7c9a52dfef5cb8b8b469f3d71d0b58))
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
