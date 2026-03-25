@@ -3,6 +3,18 @@ import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import terser from '@rollup/plugin-terser';
 
+/** Inline plugin: import .md files as string default exports. */
+function mdPlugin() {
+  return {
+    name: 'md',
+    transform(code, id) {
+      if (id.endsWith('.md')) {
+        return { code: `export default ${JSON.stringify(code)};`, map: null };
+      }
+    },
+  };
+}
+
 export default [
   // ESM build
   {
@@ -13,6 +25,7 @@ export default [
       sourcemap: true,
     },
     plugins: [
+      mdPlugin(),
       resolve(),
       commonjs(),
       typescript({ tsconfig: './tsconfig.json', declaration: true, declarationDir: 'dist' }),
@@ -29,9 +42,10 @@ export default [
       footer: 'if(typeof window!=="undefined"){window.VoiceSDK=VoiceSDKBundle.VoiceSDK;}',
     },
     plugins: [
+      mdPlugin(),
       resolve({ browser: true }),
       commonjs(),
-      typescript({ tsconfig: './tsconfig.json', declaration: false }),
+      typescript({ tsconfig: './tsconfig.json', declaration: false, declarationDir: undefined }),
       terser(),
     ],
   },
