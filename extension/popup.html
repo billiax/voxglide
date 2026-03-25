@@ -442,6 +442,23 @@
     }
     .footer a:hover { text-decoration: underline; }
     .footer a.disabled { color: var(--text-faint); pointer-events: none; }
+
+    /* ── Build mode ── */
+    .btn-build-mode {
+      width: 100%;
+      padding: 8px;
+      border: 1.5px solid #7c3aed;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      background: transparent;
+      color: #7c3aed;
+      transition: all 0.15s;
+    }
+    .btn-build-mode:hover { background: rgba(124, 58, 237, 0.08); }
+    .btn-build-mode.active { background: #7c3aed; color: #fff; }
   </style>
 </head>
 <body>
@@ -547,7 +564,38 @@
       <label class="toggle"><input type="checkbox" id="autoInject" /><span class="slider"></span></label>
     </div>
 
+    <div class="form-group">
+      <button class="section-toggle" id="buildModeToggle">
+        <span class="form-label" style="margin-bottom:0">Build Mode</span>
+        <span class="section-arrow" id="buildModeArrow">&#x25B8;</span>
+      </button>
+      <div class="section-body" id="buildModeBody" style="display:none">
+        <div class="toggle-row" style="border:none;padding:0;background:none">
+          <div>
+            <div class="toggle-row-label">Enable Build Mode</div>
+            <div class="toggle-row-hint">Generate AI tools with Claude Code</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="buildModeEnabled" /><span class="slider"></span></label>
+        </div>
+        <div id="buildModeFields" style="display:none">
+          <div class="form-group" style="margin-top:8px">
+            <label class="form-label">API URL</label>
+            <input type="text" id="buildApiUrl" placeholder="https://your-api-server.example.com" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">API Key</label>
+            <input type="text" id="buildApiKey" placeholder="Your Claude Code API key" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Workspace</label>
+            <div id="buildWorkspacePreview" style="font-size:12px;color:var(--text-muted);padding:4px 0;font-family:monospace;">workspace-...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <button class="btn-primary" id="inject">Inject Now</button>
+    <button class="btn-build-mode" id="toggleBuildMode" style="display:none">Toggle Build Mode</button>
     <div id="status"></div>
   </div>
 

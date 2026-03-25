@@ -1,3 +1,12 @@
+// Ensure deviceId exists on install/startup
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.get('deviceId', (d) => {
+    if (!d.deviceId) {
+      chrome.storage.local.set({ deviceId: crypto.randomUUID().slice(0, 8) });
+    }
+  });
+});
+
 // Inject code into a tab's MAIN world
 async function executeInTab(tabId, code) {
   await chrome.scripting.executeScript({
@@ -41,38 +50,6 @@ async function injectIntoTab(tabId, scriptUrl, initCode) {
   if (!combinedCode) return;
 
   await executeInTab(tabId, combinedCode);
-}
-
-// After SDK injection, check if nbt_functions should be auto-injected for this domain
-async function injectNbtFunctions(tabId, httpBase, tabUrl) {
-  try {
-    const manifestUrl = `${httpBase}/sdk/functions/manifest.json`;
-    const res = await fetch(manifestUrl, {
-      headers: { 'ngrok-skip-browser-warning': '1' },
-    });
-    if (!res.ok) return;
-
-    const manifest = await res.json();
-    if (!manifest.functions || !Array.isArray(manifest.functions)) return;
-
-    const hostname = new URL(tabUrl).hostname;
-
-    for (const entry of manifest.functions) {
-      if (!entry.match || !entry.script) continue;
-      if (!hostname.includes(entry.match)) continue;
-
-      const scriptUrl = `${httpBase}/sdk/functions/${entry.script}`;
-      const scriptRes = await fetch(scriptUrl, {
-        headers: { 'ngrok-skip-browser-warning': '1' },
-      });
-      if (!scriptRes.ok) continue;
-
-      const code = await scriptRes.text();
-      await executeInTab(tabId, code);
-    }
-  } catch {
-    // Fail silently — nbt_functions injection is best-effort
-  }
 }
 
 // Build UI config string for init code (only non-default values)
@@ -140,6 +117,14 @@ function buildInjectionParams(data) {
     lines.push('  ui: {\n' + uiLines.join(',\n') + '\n  }');
   }
 
+  if (data.buildModeEnabled && data.buildApiUrl) {
+    const bmLines = [];
+    bmLines.push(`    apiUrl: '${data.buildApiUrl}'`);
+    bmLines.push(`    apiKey: '${data.buildApiKey || ''}'`);
+    bmLines.push(`    workspace: location.host + '-${data.deviceId || 'default'}'`);
+    lines.push('  buildMode: {\n' + bmLines.join(',\n') + '\n  }');
+  }
+
   const initCode = `new VoiceSDK({\n${lines.join(',\n')}\n});`;
 
   return { scriptUrl, initCode, httpBase };
@@ -147,12 +132,26 @@ function buildInjectionParams(data) {
 
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Build mode: proxy fetch requests to bypass CORS
+  if (msg.action === 'buildFetch') {
+    fetch(msg.url, {
+      method: msg.options?.method || 'GET',
+      headers: msg.options?.headers || {},
+      body: msg.options?.body || undefined,
+    })
+      .then(async (res) => {
+        const body = await res.text();
+        sendResponse({ ok: res.ok, status: res.status, body });
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, status: 0, body: err.message });
+      });
+    return true; // async sendResponse
+  }
+
   if (msg.action === 'inject') {
     injectIntoTab(msg.tabId, msg.scriptUrl, msg.initCode)
-      .then(async () => {
-        if (msg.httpBase && msg.tabUrl) {
-          await injectNbtFunctions(msg.tabId, msg.httpBase, msg.tabUrl);
-        }
+      .then(() => {
         sendResponse({ success: true });
       })
       .catch((err) => sendResponse({ success: false, error: err.message }));
@@ -182,7 +181,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
     chrome.storage.local.get(
       ['serverUrl', 'optAutoContext', 'optTts', 'optDebug', 'context', 'autoInject',
-       'uiPosition', 'uiSize', 'uiTheme', 'uiAccentColor', 'uiOffsetX', 'uiOffsetY'],
+       'uiPosition', 'uiSize', 'uiTheme', 'uiAccentColor', 'uiOffsetX', 'uiOffsetY',
+       'buildModeEnabled', 'buildApiUrl', 'buildApiKey', 'deviceId'],
       (data) => {
         if (!data.autoInject) return;
 
@@ -190,7 +190,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         if (!params) return;
 
         injectIntoTab(tabId, params.scriptUrl, params.initCode)
-          .then(() => injectNbtFunctions(tabId, params.httpBase, tab.url))
           .catch(() => {});
       }
     );
