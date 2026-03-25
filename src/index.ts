@@ -58,6 +58,8 @@ export { ContextCache } from './context/ContextCache';
 export { ActionRouter } from './actions/ActionRouter';
 /** @internal */
 export { NbtFunctionsProvider } from './actions/NbtFunctionsProvider';
+/** @internal */
+export { FunctionLoader } from './actions/FunctionLoader';
 export { NavigationObserver } from './NavigationObserver';
 export type { NavigationEvent, NavigationCallback, BeforeUnloadCallback } from './NavigationObserver';
 /** @internal */
@@ -79,3 +81,14 @@ export type { UIState, UIStateListener } from './ui/UIStateMachine';
 /** @internal */
 export { TranscriptStore } from './ui/TranscriptStore';
 export type { StoredTranscriptLine } from './ui/TranscriptStore';
+
+// Build mode
+export { BuildModeManager } from './build/BuildModeManager';
+export { BuildModeSession } from './build/BuildModeSession';
+export { BuildSpeechCapture } from './build/BuildSpeechCapture';
+export { BrowserToolExecutor } from './build/browser-tools/BrowserToolExecutor';
+export { CodeExtractor } from './build/CodeExtractor';
+export type {
+  BuildModeConfig, BuildModeState, ExtractedCodeBlock,
+  BrowserRequest, BrowserToolResult, PendingTool, ToolDefinition, ToolParameterDef,
+} from './build/types';

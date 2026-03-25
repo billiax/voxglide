@@ -4,7 +4,10 @@ import { ActionRouter } from './actions/ActionRouter';
 import { NavigationHandler } from './actions/NavigationHandler';
 import { NavigationObserver } from './NavigationObserver';
 import { NbtFunctionsProvider } from './actions/NbtFunctionsProvider';
+import { FunctionLoader } from './actions/FunctionLoader';
 import { invalidateElementCache, setPostClickCallback } from './actions/DOMActions';
+import { BuildModeManager } from './build/BuildModeManager';
+import { BuildSpeechCapture } from './build/BuildSpeechCapture';
 import { UIManager } from './ui/UIManager';
 import { WorkflowEngine } from './workflows/WorkflowEngine';
 import { WorkflowContextProvider } from './workflows/WorkflowContextProvider';
@@ -37,9 +40,13 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   private toggling = false;
   private navigationObserver: NavigationObserver | null = null;
   private nbtFunctionsProvider: NbtFunctionsProvider | null = null;
+  private functionLoader: FunctionLoader | null = null;
   private workflowEngine: WorkflowEngine | null = null;
   private a11yManager: AccessibilityManager | null = null;
   private destroyed = false;
+  private panelMode: 'normal' | 'build' = 'normal';
+  private buildManager: BuildModeManager | null = null;
+  private buildSpeech: BuildSpeechCapture | null = null;
   private speechCurrentlyActive = false;
   /** Whether SpeechCapture intends to be running (user hasn't stopped it). */
   private speechRunning = false;
@@ -145,6 +152,92 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
       if (Object.keys(initialActions).length > 0) {
         this.actionRouter.registerCustomActions(initialActions);
       }
+
+      // Auto-load server-side functions (fire-and-forget: loads before start())
+      this.functionLoader = new FunctionLoader(config.serverUrl, config.debug);
+      this.functionLoader.load().then(() => {
+        this.nbtFunctionsProvider?.sync();
+      });
+    }
+
+
+
+    // Set up build mode if configured
+    if (config.buildMode) {
+      // Derive HTTP URL from WebSocket URL for server-side function persistence
+      const buildConfig = { ...config.buildMode };
+      if (!buildConfig.serverUrl && config.serverUrl) {
+        buildConfig.serverUrl = config.serverUrl
+          .replace(/^ws:/, 'http:')
+          .replace(/^wss:/, 'https:');
+      }
+
+      this.buildManager = new BuildModeManager(
+        buildConfig,
+        {
+          onModeChange: (active, silent) => {
+            if (active) {
+              this.ui?.showBuildButton();
+              this.ui?.renderBuildButton({ visible: true, panelVisible: false, speechActive: false, aiThinking: false });
+              if (!silent) {
+                this.switchToBuildPanel();
+              }
+            } else {
+              this.ui?.hideBuildButton();
+              if (this.panelMode === 'build') {
+                this.switchToNormalPanel();
+              }
+              this.stopBuildSpeech();
+            }
+          },
+          onTranscript: (text, speaker, isFinal) => {
+            this.emit('transcript', { speaker, text, isFinal });
+            this.ui?.addTranscript({ speaker, text, isFinal });
+          },
+          onToolsRegistered: (names) => {
+            this.ui?.addBuildSystemMessage(`Tools registered: ${names.join(', ')}`);
+            this.nbtFunctionsProvider?.sync();
+          },
+          onToolSavedToServer: () => {
+            // Re-fetch from server so FunctionLoader's ownership tracking stays in sync
+            if (this.functionLoader) {
+              this.functionLoader.invalidate();
+              this.functionLoader.load().then(() => this.nbtFunctionsProvider?.sync());
+            }
+          },
+          onPendingTool: (tool) => {
+            this.ui?.addPendingTool(
+              tool,
+              () => this.buildManager?.acceptTool(tool.name),
+              () => this.buildManager?.rejectTool(tool.name),
+            );
+          },
+          onToolLoopStatus: (status) => {
+            this.ui?.setToolLoopStatus(status);
+          },
+          onError: (message) => {
+            this.emit('error', { message });
+            this.ui?.addSystemMessage(`Build error: ${message}`);
+          },
+          onLoadingChange: (loading) => {
+            this.ui?.setAIThinking(loading);
+            if (this.panelMode === 'build') {
+              this.ui?.renderBuildButton({
+                visible: true,
+                panelVisible: this.ui?.isPanelVisible() ?? false,
+                speechActive: this.buildSpeech?.isRunning() ?? false,
+                aiThinking: loading,
+              });
+            }
+          },
+          onDebug: (msg) => {
+            if (config.debug) console.log(`[VoiceSDK:build] ${msg}`);
+          },
+        },
+        {
+          getPageContextProvider: () => this.contextCoordinator.getPageContextProvider(),
+        },
+      );
     }
 
     // Set up workflows
@@ -196,6 +289,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         () => this.toggle(),
         (text) => this.sendText(text),
         this.resolvedInputMode,
+        () => this.toggleBuild(),
       );
       // Wire accessibility to Shadow DOM host if enabled
       if (this.a11yManager) {
@@ -207,6 +301,31 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     if (this.ui) {
       this.ui.setDisconnectHandler(() => this.stop());
       this.ui.setMinimizeHandler(() => this.ui?.hideTranscript());
+      this.ui.setRefreshHandler(() => this.resetBuildSession());
+    }
+
+    // Auto-restore build mode if previously active (persisted across page loads).
+    // Silent activation just shows the build button — no panel, no message.
+    // The session ID is silently preserved so the next user message continues
+    // the same Claude conversation. Only tool-loop interruptions get special UI.
+    if (this.buildManager && BuildModeManager.isPersistedActive()) {
+      this.buildManager.activate({ silent: true });
+
+      if (this.buildManager.hasPendingResume()) {
+        // Tool loop was interrupted by navigation — show panel and auto-resume
+        this.switchToBuildPanel();
+        this.ui?.clearTranscript();
+        this.stopBuildSpeech();
+        this.ui?.addBuildSystemMessage('Resuming after page navigation...');
+        const scanDelay = this.getAutoContextConfig()?.scanDelay ?? 500;
+        setTimeout(async () => {
+          if (this.functionLoader) {
+            await this.functionLoader.ready();
+            this.nbtFunctionsProvider?.sync();
+          }
+          this.buildManager?.resumeAfterNavigation();
+        }, scanDelay);
+      }
     }
 
     // Set up SPA navigation detection + beforeunload session persistence
@@ -256,6 +375,15 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     this.setConnectionState(ConnectionState.CONNECTING);
     // Reset dedup state for new connection
     this.contextCoordinator.resetDedupState();
+
+    // Wait for in-flight function load (non-blocking if already done).
+    // This piggybacks on the constructor's eager load — it does NOT start a new fetch.
+    // If the load is still pending, we wait briefly so tool declarations are included
+    // in session.start. If it already finished, this resolves instantly.
+    if (this.functionLoader) {
+      await this.functionLoader.ready();
+      this.nbtFunctionsProvider?.sync();
+    }
 
     try {
       // Check for stored sessionId from navigation reconnect.
@@ -345,12 +473,12 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           this.ui?.setAIThinking(false);
 
           // Show tool status in UI
-          this.ui?.showToolStatus(fc.name);
+          this.ui?.setToolLoopStatus(fc.name);
 
           const result = await this.actionRouter.route(fc);
 
           // Remove tool status from UI
-          this.ui?.removeToolStatus();
+          this.ui?.setToolLoopStatus(null);
 
           actionEvent.result = result;
           this.emit('action', actionEvent);
@@ -363,7 +491,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         onError: (message) => {
           this.setConnectionState(ConnectionState.ERROR);
           this.ui?.setAIThinking(false);
-          this.ui?.removeToolStatus();
+          this.ui?.setToolLoopStatus(null);
           this.emit('error', { message });
         },
         onSessionEnd: (usage) => {
@@ -451,6 +579,11 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     // Guard against concurrent toggle calls (double-clicks, etc.)
     if (this.toggling) return;
 
+    // If build panel is showing, switch to normal mode first
+    if (this.panelMode === 'build') {
+      this.switchToNormalPanel();
+    }
+
     if (this.connectionState === ConnectionState.CONNECTED) {
       if (this.resolvedInputMode === 'text') {
         // Text mode: always toggle panel visibility, session persists
@@ -495,6 +628,12 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
    * Send text directly to the AI (text mode, useful for debugging without mic).
    */
   sendText(text: string): void {
+    // Build mode panel: route to BuildModeManager
+    if (this.panelMode === 'build' && this.buildManager?.isActive()) {
+      this.buildManager.sendMessage(text);
+      return;
+    }
+
     if (!this.session || this.connectionState !== ConnectionState.CONNECTED) {
       this.emit('error', { message: 'Not connected. Call start() first.' });
       return;
@@ -534,6 +673,104 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   }
 
   /**
+   * Toggle build mode on/off.
+   * When active, user messages are sent to the Claude Code API for tool generation.
+   */
+  toggleBuildMode(): void {
+    if (!this.buildManager) {
+      this.emit('error', { message: 'Build mode not configured. Set buildMode in config.' });
+      return;
+    }
+    this.buildManager.toggle();
+  }
+
+  /**
+   * Check if build mode is currently active.
+   */
+  isBuildModeActive(): boolean {
+    return this.buildManager?.isActive() ?? false;
+  }
+
+  /**
+   * Set build mode active/inactive programmatically.
+   */
+  setBuildMode(active: boolean): void {
+    if (!this.buildManager) return;
+    if (active) this.buildManager.activate();
+    else this.buildManager.deactivate();
+  }
+
+  /**
+   * Toggle build panel — called when the build button is clicked.
+   */
+  private toggleBuild(): void {
+    if (this.destroyed) return;
+    if (!this.buildManager) return;
+
+    if (this.panelMode === 'build' && this.ui?.isPanelVisible()) {
+      // Build panel showing — toggle build speech on/off
+      if (this.buildSpeech?.isRunning()) {
+        this.stopBuildSpeech();
+      } else {
+        this.startBuildSpeech();
+      }
+    } else {
+      // Switch to build panel
+      this.switchToBuildPanel();
+    }
+  }
+
+  /**
+   * Switch the transcript panel to build mode.
+   */
+  private switchToBuildPanel(): void {
+    this.panelMode = 'build';
+    this.ui?.clearTranscript();
+    this.ui?.setTranscriptBuildMode(true, 'Build Mode');
+    this.ui?.showTranscript();
+    this.ui?.setAutoHideEnabled(false);
+    this.ui?.showRefreshButton();
+    this.ui?.addBuildSystemMessage('Build mode active \u2014 describe the tool you want to create.');
+    this.startBuildSpeech();
+    // Update build button state
+    this.ui?.renderBuildButton({
+      visible: true,
+      panelVisible: true,
+      speechActive: this.buildSpeech?.isRunning() ?? false,
+      aiThinking: false,
+    });
+  }
+
+  /**
+   * Switch the transcript panel back to normal mode.
+   */
+  private switchToNormalPanel(): void {
+    this.panelMode = 'normal';
+    this.stopBuildSpeech();
+    this.ui?.clearTranscript();
+    this.ui?.setTranscriptBuildMode(false, 'Assistant');
+    this.ui?.hideRefreshButton();
+    this.ui?.setAutoHideEnabled(true);
+    // Update build button state — panel no longer showing build
+    this.ui?.renderBuildButton({
+      visible: this.buildManager?.isActive() ?? false,
+      panelVisible: false,
+      speechActive: false,
+      aiThinking: false,
+    });
+  }
+
+  /**
+   * Reset the build session — starts a fresh conversation.
+   */
+  private resetBuildSession(): void {
+    if (!this.buildManager) return;
+    this.buildManager.newSession();
+    this.ui?.clearTranscript();
+    this.ui?.addBuildSystemMessage('New build session started.');
+  }
+
+  /**
    * Dump scan results for debugging. Returns the current page context.
    */
   async dumpScanResults(): Promise<string> {
@@ -555,8 +792,14 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     // Ensure UI is still attached (SPA may have replaced body children)
     this.ui?.ensureAttached();
 
-    // Re-check nbt_functions (page may expose different functions per route)
-    this.nbtFunctionsProvider?.sync();
+    // Re-load server functions for the new URL, then sync nbt_functions
+    if (this.functionLoader) {
+      this.functionLoader.reload().then(() => {
+        this.nbtFunctionsProvider?.sync();
+      });
+    } else {
+      this.nbtFunctionsProvider?.sync();
+    }
 
     // Begin watch period for DOM stability before scanning
     const pageCtx = this.contextCoordinator.getPageContextProvider();
@@ -574,6 +817,11 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
    * Saves session state so the SDK can reconnect on the new page.
    */
   private handleBeforeUnload(): void {
+    // Save build mode session state (independent of voice session autoReconnect)
+    if (this.buildManager?.isActive()) {
+      this.buildManager.saveSessionState();
+    }
+
     if (this.config.autoReconnect === false) return;
     if (this.connectionState !== ConnectionState.CONNECTED && this.connectionState !== ConnectionState.CONNECTING) return;
 
@@ -733,6 +981,49 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     });
   }
 
+  // ── Build mode speech capture ──
+
+  private startBuildSpeech(): void {
+    if (this.resolvedInputMode !== 'voice') return;
+    if (this.buildSpeech) return;
+
+    this.buildSpeech = new BuildSpeechCapture(
+      this.config.language ?? DEFAULT_LANGUAGE,
+      {
+        onInterimResult: (text) => {
+          this.ui?.addTranscript({ speaker: 'user', text, isFinal: false });
+        },
+        onFinalMessage: (text) => {
+          if (this.buildManager?.isActive()) {
+            this.buildManager.sendMessage(text);
+          }
+        },
+        onStatusChange: (active) => {
+          this.ui?.setSpeechState(active, false);
+          if (this.panelMode === 'build') {
+            this.ui?.renderBuildButton({
+              visible: true,
+              panelVisible: this.ui?.isPanelVisible() ?? false,
+              speechActive: active,
+              aiThinking: false,
+            });
+          }
+        },
+      },
+    );
+    this.buildSpeech.start();
+
+    if (this.config.debug) {
+      console.log('[VoiceSDK:build] Speech capture started');
+    }
+  }
+
+  private stopBuildSpeech(): void {
+    this.buildSpeech?.stop();
+    this.buildSpeech = null;
+    this.ui?.setSpeechState(false, false);
+  }
+
   /**
    * Destroy the SDK instance and clean up all resources.
    * Safe to call multiple times (idempotent).
@@ -755,6 +1046,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     this.ui?.destroy();
     this.ui = null;
 
+    this.stopBuildSpeech();
+    this.buildManager?.destroy();
+    this.buildManager = null;
     this.ttsManager.cancel();
     await this.stop();
     this.contextCoordinator.destroy();

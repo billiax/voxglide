@@ -82,6 +82,18 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
   /* Dead-center */
   .vsdk-container.center        { top: 50%; left: 50%; transform: translate(-50%, -50%); align-items: center; }
 
+  /* ── Button row (holds main + optional build button) ── */
+  .vsdk-button-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .vsdk-button-row > * {
+    pointer-events: auto;
+  }
+
   /* ── Floating button ── */
   .vsdk-btn {
     pointer-events: auto;
@@ -123,6 +135,7 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
 
   /* Focus outlines */
   .vsdk-btn:focus-visible,
+  .vsdk-panel-refresh:focus-visible,
   .vsdk-panel-minimize:focus-visible,
   .vsdk-panel-end-session:focus-visible,
   .vsdk-text-send:focus-visible,
@@ -143,6 +156,177 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
   @keyframes vsdk-spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
+  }
+
+  /* ── Build mode button ── */
+  .vsdk-btn.vsdk-build-mode {
+    background: #7c3aed;
+    animation: vsdk-pulse-purple 2s ease-in-out infinite;
+  }
+  .vsdk-btn.vsdk-build-mode:hover { background: #6d28d9; }
+
+  @keyframes vsdk-pulse-purple {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
+    50% { box-shadow: 0 0 0 10px rgba(124, 58, 237, 0); }
+  }
+
+  /* Build mode header dot */
+  .vsdk-panel-dot.vsdk-build-mode { background: #7c3aed; }
+
+  /* Build mode header URL badge */
+  .vsdk-build-url {
+    font-size: 11px;
+    color: var(--vsdk-text-muted);
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px 8px;
+    background: rgba(124, 58, 237, 0.06);
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+    margin-left: 4px;
+  }
+
+  /* Build mode system messages */
+  .vsdk-transcript-line.vsdk-msg-build {
+    text-align: center;
+    font-size: 12px;
+    color: #7c3aed;
+    font-weight: 500;
+    max-width: 100%;
+    background: rgba(124, 58, 237, 0.06);
+    padding: 6px 12px;
+    border-radius: 8px;
+    align-self: center;
+  }
+
+  /* AI messages in build mode get a subtle purple accent */
+  .vsdk-transcript.vsdk-build-panel .vsdk-msg-ai {
+    border-left: 2px solid rgba(124, 58, 237, 0.25);
+    border-bottom-left-radius: 4px;
+  }
+
+  /* ── Pending tool cards ── */
+  .vsdk-pending-tool {
+    border: 1px solid rgba(124, 58, 237, 0.2);
+    border-radius: 12px;
+    padding: 0;
+    margin: 4px 0;
+    background: rgba(124, 58, 237, 0.04);
+    max-width: 100%;
+    overflow: hidden;
+    animation: vsdk-msg-in 0.25s ease-out;
+  }
+  .vsdk-pending-tool.pending {
+    border-color: rgba(124, 58, 237, 0.3);
+  }
+  .vsdk-pending-tool-header {
+    padding: 10px 12px 0;
+  }
+  .vsdk-pending-tool-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #7c3aed;
+  }
+  .vsdk-pending-tool-title-row svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    opacity: 0.7;
+  }
+  .vsdk-pending-tool-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: #7c3aed;
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  }
+  .vsdk-pending-tool-code {
+    font-size: 11px;
+    line-height: 1.5;
+    max-height: 60px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.03);
+    padding: 8px 12px;
+    margin: 8px 0 0;
+    border-top: 1px solid rgba(124, 58, 237, 0.1);
+    border-bottom: 1px solid rgba(124, 58, 237, 0.1);
+    white-space: pre;
+    color: var(--vsdk-text-muted);
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  }
+  .vsdk-pending-tool-actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    justify-content: flex-end;
+  }
+  .vsdk-pending-tool-accept,
+  .vsdk-pending-tool-reject {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  }
+  .vsdk-pending-tool-accept svg,
+  .vsdk-pending-tool-reject svg {
+    width: 13px;
+    height: 13px;
+  }
+  .vsdk-pending-tool-accept {
+    background: #22c55e;
+    color: #fff;
+    box-shadow: 0 1px 4px rgba(34, 197, 94, 0.3);
+  }
+  .vsdk-pending-tool-accept:hover {
+    background: #16a34a;
+    box-shadow: 0 2px 8px rgba(34, 197, 94, 0.4);
+  }
+  .vsdk-pending-tool-accept:active { transform: scale(0.96); }
+  .vsdk-pending-tool-reject {
+    background: transparent;
+    color: var(--vsdk-text-muted);
+    border: 1px solid var(--vsdk-border);
+  }
+  .vsdk-pending-tool-reject:hover {
+    background: rgba(220, 38, 38, 0.06);
+    border-color: rgba(220, 38, 38, 0.3);
+    color: var(--vsdk-danger);
+  }
+  .vsdk-pending-tool-reject:active { transform: scale(0.96); }
+  .vsdk-pending-tool.accepted {
+    border-color: rgba(34, 197, 94, 0.3);
+    background: rgba(34, 197, 94, 0.04);
+  }
+  .vsdk-pending-tool.accepted .vsdk-pending-tool-title-row { color: var(--vsdk-success); }
+  .vsdk-pending-tool.accepted .vsdk-pending-tool-name {
+    color: var(--vsdk-success);
+  }
+  .vsdk-pending-tool.accepted .vsdk-pending-tool-name::after {
+    content: ' — registered';
+    font-weight: 400;
+    font-family: inherit;
+    font-size: 11px;
+  }
+  .vsdk-pending-tool.rejected {
+    opacity: 0.4;
+    border-color: var(--vsdk-border);
+    background: transparent;
+  }
+  .vsdk-pending-tool.rejected .vsdk-pending-tool-name::after {
+    content: ' — rejected';
+    font-weight: 400;
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--vsdk-text-muted);
   }
 
   /* ── Chat panel ── */
@@ -201,6 +385,7 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     color: var(--vsdk-text);
     letter-spacing: -0.01em;
   }
+  .vsdk-panel-refresh,
   .vsdk-panel-minimize,
   .vsdk-panel-end-session {
     pointer-events: auto;
@@ -216,6 +401,7 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     justify-content: center;
     transition: background 0.15s, color 0.15s;
   }
+  .vsdk-panel-refresh:hover,
   .vsdk-panel-minimize:hover {
     background: var(--vsdk-border);
     color: var(--vsdk-text);
@@ -224,6 +410,7 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     background: rgba(220, 38, 38, 0.1);
     color: var(--vsdk-danger);
   }
+  .vsdk-panel-refresh svg,
   .vsdk-panel-minimize svg,
   .vsdk-panel-end-session svg {
     width: 14px;
@@ -357,58 +544,113 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
   .vsdk-text-send:active { transform: scale(0.9); }
   .vsdk-text-send svg { width: 16px; height: 16px; }
 
-  /* ── Tool status ── */
-  .vsdk-tool-status {
-    font-size: 12px;
-    color: var(--vsdk-text-muted);
-    padding: 6px 12px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
+  /* ── Unified activity bubble ── */
+  .vsdk-activity {
     align-self: flex-start;
-    background: var(--vsdk-ai-bg);
-    border-radius: 14px;
-  }
-  .vsdk-tool-status::before {
-    content: '';
-    display: inline-block;
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--vsdk-primary);
-    animation: vsdk-blink 1s ease-in-out infinite;
-    flex-shrink: 0;
-  }
-  .vsdk-tool-status.completed::before { background: var(--vsdk-success); animation: none; }
-  .vsdk-tool-status.failed::before { background: var(--vsdk-danger); animation: none; }
-  @keyframes vsdk-blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
+    border-radius: 18px;
+    border-bottom-left-radius: 6px;
+    position: relative;
+    overflow: hidden;
+    animation: vsdk-msg-in 0.2s ease-out;
+    transition: all 0.2s ease;
   }
 
-  /* ── Thinking indicator ── */
-  .vsdk-thinking {
+  /* Thinking stage: three bouncing dots */
+  .vsdk-activity-thinking {
+    background: var(--vsdk-ai-bg);
+    padding: 10px 16px;
+  }
+  .vsdk-activity-dots {
     display: flex;
     align-items: center;
     gap: 5px;
-    padding: 10px 16px;
-    align-self: flex-start;
-    background: var(--vsdk-ai-bg);
-    border-radius: 18px;
-    border-bottom-left-radius: 6px;
   }
-  .vsdk-thinking span {
+  .vsdk-activity-dots span {
     display: inline-block;
     width: 6px; height: 6px;
     border-radius: 50%;
     background: var(--vsdk-text-muted);
     animation: vsdk-dot-bounce 1.4s ease-in-out infinite both;
   }
-  .vsdk-thinking span:nth-child(1) { animation-delay: 0s; }
-  .vsdk-thinking span:nth-child(2) { animation-delay: 0.16s; }
-  .vsdk-thinking span:nth-child(3) { animation-delay: 0.32s; }
+  .vsdk-activity-dots span:nth-child(1) { animation-delay: 0s; }
+  .vsdk-activity-dots span:nth-child(2) { animation-delay: 0.16s; }
+  .vsdk-activity-dots span:nth-child(3) { animation-delay: 0.32s; }
   @keyframes vsdk-dot-bounce {
     0%, 80%, 100% { transform: scale(0.5); opacity: 0.35; }
     40% { transform: scale(1); opacity: 1; }
+  }
+
+  /* Executing / processing stages */
+  .vsdk-activity-executing,
+  .vsdk-activity-processing {
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.08) 0%, rgba(124, 58, 237, 0.04) 100%);
+    border: 1px solid rgba(124, 58, 237, 0.15);
+    padding: 9px 14px;
+  }
+  .vsdk-activity-inner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    z-index: 1;
+  }
+  .vsdk-activity-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: rgba(124, 58, 237, 0.12);
+    color: #7c3aed;
+    flex-shrink: 0;
+  }
+  .vsdk-activity-executing .vsdk-activity-icon svg {
+    animation: vsdk-spin 2s linear infinite;
+  }
+  .vsdk-activity-processing .vsdk-activity-icon svg {
+    animation: vsdk-pulse-opacity 1.5s ease-in-out infinite;
+  }
+  .vsdk-activity-icon svg {
+    width: 12px;
+    height: 12px;
+  }
+  .vsdk-activity-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #7c3aed;
+    letter-spacing: -0.01em;
+  }
+
+  /* Shimmer overlay */
+  .vsdk-activity-shimmer {
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(124, 58, 237, 0.06) 40%,
+      rgba(124, 58, 237, 0.1) 50%,
+      rgba(124, 58, 237, 0.06) 60%,
+      transparent 100%
+    );
+    animation: vsdk-shimmer 2s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes vsdk-shimmer {
+    0% { left: -100%; }
+    100% { left: 100%; }
+  }
+  @keyframes vsdk-pulse-opacity {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  @keyframes vsdk-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
   }
 
   /* ── Queue panel ── */
@@ -656,6 +898,7 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
     --vsdk-border: #000000;
   }
   :host(.high-contrast) .vsdk-btn:focus-visible,
+  :host(.high-contrast) .vsdk-panel-refresh:focus-visible,
   :host(.high-contrast) .vsdk-panel-minimize:focus-visible,
   :host(.high-contrast) .vsdk-panel-end-session:focus-visible,
   :host(.high-contrast) .vsdk-text-send:focus-visible,
@@ -676,12 +919,14 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
       max-height: calc(100dvh - 120px);
       border-radius: 12px;
     }
+    .vsdk-panel-refresh,
     .vsdk-panel-minimize,
     .vsdk-panel-end-session,
     .vsdk-settings-btn {
       width: 44px;
       height: 44px;
     }
+    .vsdk-panel-refresh svg,
     .vsdk-panel-minimize svg,
     .vsdk-panel-end-session svg,
     .vsdk-settings-btn svg {
