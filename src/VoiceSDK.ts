@@ -62,9 +62,17 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
 
     // Snapshot pending reconnect BEFORE destroying old instance.
     // destroy() clears sessionStorage, so we must read first.
-    const pendingReconnect = (config.autoReconnect !== false)
+    // Skip reconnect on page reload (F5/Ctrl+R) — only reconnect on
+    // real navigation (link click, AI navigateTo, back/forward).
+    const isReload = VoiceSDK.isPageReload();
+    const pendingReconnect = (config.autoReconnect !== false && !isReload)
       ? NavigationHandler.getPendingReconnect()
       : null;
+    // Clear stale session state on reload so it doesn't persist across
+    // future navigations from this reloaded page.
+    if (isReload) {
+      NavigationHandler.clearPendingReconnect();
+    }
 
     // Singleton enforcement: destroy previous instance to prevent ghost
     // WebSocket/SpeechCapture/UI from lingering when re-injected by extensions.
@@ -562,15 +570,14 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
   }
 
   /**
-   * Toggle — 3-state button behavior:
+   * Toggle button behavior:
    *
-   * Voice mode (primary):
+   * Voice mode:
    *   Disconnected/error → start (connect + mic + open panel)
    *   Connected + panel visible → stop (disconnect session)
-   *   Connected + panel hidden (minimized) → show panel
-   *   Connected + speech failed but retrying → retry with user gesture
+   *   Connected + panel hidden (minimized) → show panel (session stays alive)
    *
-   * Text mode (backup/testing):
+   * Text mode:
    *   Disconnected/error → start
    *   Connected → toggle panel visibility (session persists)
    */
@@ -591,16 +598,9 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
         return;
       }
 
-      // Voice mode: 3-state logic
-      if (!this.speechCurrentlyActive && this.speechRunning && this.session) {
-        // Speech failed but intending to run — retry with user gesture
-        this.session.retrySpeech();
-        return;
-      }
-
+      // Voice mode: panel visible → stop, panel hidden → reopen
       const panelVisible = this.ui?.getStateMachine().getState().panelVisible ?? true;
       if (panelVisible) {
-        // Panel visible → stop session (one-click stop, like every voice assistant)
         this.toggling = true;
         try {
           await this.stop();
@@ -608,7 +608,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           this.toggling = false;
         }
       } else {
-        // Panel hidden (user minimized) → show panel, session stays alive
+        // Panel was minimized — reopen it, session stays alive
         this.ui?.showTranscript();
       }
       return;
@@ -1081,5 +1081,21 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     if (this.config.autoContext === false || this.config.autoContext === undefined) return null;
     if (this.config.autoContext === true) return {};
     return this.config.autoContext;
+  }
+
+  /**
+   * Detect if the current page load is a reload (F5/Ctrl+R) vs a navigation.
+   * Uses the Navigation Timing API which is supported in all modern browsers.
+   */
+  private static isPageReload(): boolean {
+    try {
+      const entries = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+      if (entries.length > 0) {
+        return entries[0].type === 'reload';
+      }
+    } catch {
+      // Navigation Timing API not available
+    }
+    return false;
   }
 }

@@ -461,14 +461,28 @@ describe('VoiceSDK', () => {
       expect(lastSession().disconnect).toHaveBeenCalled();
     });
 
-    it('retries speech when connected but speech is not active', async () => {
+    it('stops when connected but speech is not active and panel visible', async () => {
       await sdk.start();
       const session = lastSession();
       session.callbacks.onStatusChange('connected');
       session.callbacks.onSpeechStateChange(false, false, true);
       await sdk.toggle();
+      expect(session.disconnect).toHaveBeenCalled();
+    });
+
+    it('shows panel when connected and panel is minimized (not stop)', async () => {
+      await sdk.start();
+      const session = lastSession();
+      const ui = uiInstances[uiInstances.length - 1];
+      session.callbacks.onStatusChange('connected');
+      session.callbacks.onSpeechStateChange(true, false, true);
+
+      // Simulate minimized panel
+      ui.getStateMachine.mockReturnValue({ getState: () => ({ panelVisible: false }) });
+
+      await sdk.toggle();
       expect(session.disconnect).not.toHaveBeenCalled();
-      expect(session.retrySpeech).toHaveBeenCalled();
+      expect(ui.showTranscript).toHaveBeenCalled();
     });
 
     it('starts when in ERROR state', async () => {

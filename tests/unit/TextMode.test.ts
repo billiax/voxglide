@@ -285,15 +285,14 @@ describe('Text Mode', () => {
       expect(proxySessionInstances[0].disconnect).toHaveBeenCalled();
     });
 
-    it('toggle while connected but speech inactive retries speech', async () => {
+    it('toggle while connected but speech inactive stops session (1-click stop)', async () => {
       await sdk.start();
       const session = proxySessionInstances[0];
       session.callbacks.onStatusChange('connected');
       session.callbacks.onSpeechStateChange(false, false, true);
 
       await sdk.toggle();
-      expect(sdk.getConnectionState()).toBe(ConnectionState.CONNECTED);
-      expect(session.retrySpeech).toHaveBeenCalled();
+      expect(session.disconnect).toHaveBeenCalled();
     });
   });
 
