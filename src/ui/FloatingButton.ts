@@ -1,4 +1,4 @@
-import { micIcon, micOffIcon, micPausedIcon, loaderIcon, chatIcon, closeIcon } from './icons';
+import { micIcon, micActiveIcon, micPausedIcon, loaderIcon, chatIcon, closeIcon } from './icons';
 import { ConnectionState } from '../constants';
 import type { UIState } from './UIStateMachine';
 
@@ -22,20 +22,19 @@ export class FloatingButton {
 
   render(state: Readonly<UIState>): void {
     // Remove all state classes
-    this.button.classList.remove('listening', 'connecting', 'paused');
+    this.button.classList.remove('listening', 'connecting', 'paused', 'connected');
 
     if (state.inputMode === 'text') {
-      // Text mode
+      // Text mode — calm blue glow when connected, no red pulse
       switch (state.connection) {
         case ConnectionState.CONNECTED:
-          this.button.classList.add('listening');
-          // Show close icon when panel is visible, chat icon when hidden
+          this.button.classList.add('connected');
           if (state.panelVisible) {
             this.button.innerHTML = closeIcon;
-            this.button.setAttribute('aria-label', 'Close chat');
+            this.button.setAttribute('aria-label', 'Hide chat');
           } else {
             this.button.innerHTML = chatIcon;
-            this.button.setAttribute('aria-label', 'Open chat');
+            this.button.setAttribute('aria-label', 'Show chat');
           }
           break;
         case ConnectionState.CONNECTING:
@@ -49,7 +48,7 @@ export class FloatingButton {
           break;
       }
     } else {
-      // Voice mode: mic icons reflecting actual speech state
+      // Voice mode — icons reflect current mic state, no panelVisible branching
       switch (state.connection) {
         case ConnectionState.CONNECTED:
           if (state.speechPaused) {
@@ -58,32 +57,28 @@ export class FloatingButton {
             this.button.innerHTML = micPausedIcon;
             switch (state.pauseReason) {
               case 'tts':
-                this.button.setAttribute('aria-label', 'Microphone paused — AI speaking');
+                this.button.setAttribute('aria-label', 'Mic paused — AI speaking');
                 break;
               case 'mic-error':
-                this.button.setAttribute('aria-label', 'Microphone error — retrying');
+                this.button.setAttribute('aria-label', 'Mic error — retrying');
                 break;
               default:
                 this.button.setAttribute('aria-label', 'Microphone paused');
             }
           } else if (state.speechActive) {
-            // Actively recording
+            // Actively recording — mic with sound waves
             this.button.classList.add('listening');
+            this.button.innerHTML = micActiveIcon;
             if (state.panelVisible) {
-              // Panel visible → button will stop session
-              this.button.innerHTML = micOffIcon;
-              this.button.setAttribute('aria-label', 'Stop voice assistant');
+              this.button.setAttribute('aria-label', 'Listening — click to stop');
             } else {
-              // Panel minimized → button will reopen panel
-              this.button.innerHTML = micIcon;
               this.button.setAttribute('aria-label', 'Show transcript');
             }
           } else {
-            // Connected but speech not active (failed or unavailable).
-            // Show paused mic so user knows mic isn't capturing.
+            // Connected but speech not active (failed or unavailable)
             this.button.classList.add('paused');
             this.button.innerHTML = micPausedIcon;
-            this.button.setAttribute('aria-label', 'Microphone unavailable — use text input');
+            this.button.setAttribute('aria-label', 'Mic unavailable — use text input');
           }
           break;
         case ConnectionState.CONNECTING:

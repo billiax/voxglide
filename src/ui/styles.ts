@@ -130,11 +130,18 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
   }
   .vsdk-btn.paused:hover { background: var(--vsdk-paused-hover); }
 
+  .vsdk-btn.connected {
+    background: var(--vsdk-primary);
+    animation: vsdk-glow 3s ease-in-out infinite;
+  }
+  .vsdk-btn.connected:hover { background: var(--vsdk-primary-hover); }
+
   .vsdk-btn.connecting { background: var(--vsdk-primary); opacity: 0.8; cursor: wait; }
   .vsdk-btn.connecting svg { animation: vsdk-spin 1s linear infinite; }
 
   /* Focus outlines */
   .vsdk-btn:focus-visible,
+  .vsdk-btn.connected:focus-visible,
   .vsdk-panel-refresh:focus-visible,
   .vsdk-panel-minimize:focus-visible,
   .vsdk-panel-end-session:focus-visible,
@@ -152,6 +159,10 @@ ${Object.entries(theme.customProperties).map(([k, v]) => `    ${k}: ${v};`).join
   @keyframes vsdk-pulse-amber {
     0%, 100% { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.4); }
     50% { box-shadow: 0 0 0 10px rgba(217, 119, 6, 0); }
+  }
+  @keyframes vsdk-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.3); }
+    50% { box-shadow: 0 0 0 8px rgba(37, 99, 235, 0); }
   }
   @keyframes vsdk-spin {
     from { transform: rotate(0deg); }

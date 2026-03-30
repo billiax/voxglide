@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FloatingButton } from '../../src/ui/FloatingButton';
 import { ConnectionState } from '../../src/constants';
-import { micIcon, micOffIcon, micPausedIcon, loaderIcon, chatIcon, closeIcon } from '../../src/ui/icons';
+import { micIcon, micActiveIcon, micPausedIcon, loaderIcon, chatIcon, closeIcon } from '../../src/ui/icons';
 import type { UIState } from '../../src/ui/UIStateMachine';
 
 /**
@@ -25,6 +25,7 @@ function makeState(overrides: Partial<UIState> = {}): Readonly<UIState> {
     speechActive: false,
     speechPaused: false,
     pauseReason: null,
+    buildMode: false,
     destroyed: false,
     ...overrides,
   };
@@ -119,6 +120,7 @@ describe('FloatingButton', () => {
       expect(getButton().classList.contains('listening')).toBe(false);
       expect(getButton().classList.contains('connecting')).toBe(false);
       expect(getButton().classList.contains('paused')).toBe(false);
+      expect(getButton().classList.contains('connected')).toBe(false);
     });
 
     it('CONNECTING: shows loader icon', () => {
@@ -136,7 +138,17 @@ describe('FloatingButton', () => {
       expect(getButton().getAttribute('aria-label')).toBe('Connecting...');
     });
 
-    it('CONNECTED + speechActive + panel visible: shows micOff icon', () => {
+    it('CONNECTED + speechActive: shows micActive icon', () => {
+      fb.render(makeState({
+        inputMode: 'voice',
+        connection: ConnectionState.CONNECTED,
+        speechActive: true,
+        speechPaused: false,
+      }));
+      expect(getButton().innerHTML).toBe(domNormalize(micActiveIcon));
+    });
+
+    it('CONNECTED + speechActive: shows same icon regardless of panelVisible', () => {
       fb.render(makeState({
         inputMode: 'voice',
         connection: ConnectionState.CONNECTED,
@@ -144,10 +156,8 @@ describe('FloatingButton', () => {
         speechPaused: false,
         panelVisible: true,
       }));
-      expect(getButton().innerHTML).toBe(domNormalize(micOffIcon));
-    });
+      const withPanel = getButton().innerHTML;
 
-    it('CONNECTED + speechActive + panel hidden: shows mic icon', () => {
       fb.render(makeState({
         inputMode: 'voice',
         connection: ConnectionState.CONNECTED,
@@ -155,7 +165,10 @@ describe('FloatingButton', () => {
         speechPaused: false,
         panelVisible: false,
       }));
-      expect(getButton().innerHTML).toBe(domNormalize(micIcon));
+      const withoutPanel = getButton().innerHTML;
+
+      expect(withPanel).toBe(withoutPanel);
+      expect(withPanel).toBe(domNormalize(micActiveIcon));
     });
 
     it('CONNECTED + speechActive: adds listening class', () => {
@@ -168,7 +181,7 @@ describe('FloatingButton', () => {
       expect(getButton().classList.contains('listening')).toBe(true);
     });
 
-    it('CONNECTED + speechActive + panel visible: sets aria-label to "Stop voice assistant"', () => {
+    it('CONNECTED + speechActive + panel visible: sets aria-label to "Listening — click to stop"', () => {
       fb.render(makeState({
         inputMode: 'voice',
         connection: ConnectionState.CONNECTED,
@@ -176,7 +189,7 @@ describe('FloatingButton', () => {
         speechPaused: false,
         panelVisible: true,
       }));
-      expect(getButton().getAttribute('aria-label')).toBe('Stop voice assistant');
+      expect(getButton().getAttribute('aria-label')).toBe('Listening \u2014 click to stop');
     });
 
     it('CONNECTED + speechActive + panel hidden: sets aria-label to "Show transcript"', () => {
@@ -221,7 +234,7 @@ describe('FloatingButton', () => {
       expect(getButton().getAttribute('aria-label')).toBe('Microphone paused');
     });
 
-    it('CONNECTED + speechPaused (tts): sets aria-label to "Microphone paused — AI speaking"', () => {
+    it('CONNECTED + speechPaused (tts): sets aria-label to "Mic paused — AI speaking"', () => {
       fb.render(makeState({
         inputMode: 'voice',
         connection: ConnectionState.CONNECTED,
@@ -229,10 +242,10 @@ describe('FloatingButton', () => {
         speechPaused: true,
         pauseReason: 'tts',
       }));
-      expect(getButton().getAttribute('aria-label')).toBe('Microphone paused — AI speaking');
+      expect(getButton().getAttribute('aria-label')).toBe('Mic paused \u2014 AI speaking');
     });
 
-    it('CONNECTED + speechPaused (mic-error): sets aria-label to "Microphone error — retrying"', () => {
+    it('CONNECTED + speechPaused (mic-error): sets aria-label to "Mic error — retrying"', () => {
       fb.render(makeState({
         inputMode: 'voice',
         connection: ConnectionState.CONNECTED,
@@ -240,7 +253,7 @@ describe('FloatingButton', () => {
         speechPaused: true,
         pauseReason: 'mic-error',
       }));
-      expect(getButton().getAttribute('aria-label')).toBe('Microphone error — retrying');
+      expect(getButton().getAttribute('aria-label')).toBe('Mic error \u2014 retrying');
     });
 
     it('CONNECTED + speech not active and not paused: shows micPaused icon (unavailable)', () => {
@@ -288,6 +301,7 @@ describe('FloatingButton', () => {
       expect(getButton().classList.contains('listening')).toBe(false);
       expect(getButton().classList.contains('connecting')).toBe(false);
       expect(getButton().classList.contains('paused')).toBe(false);
+      expect(getButton().classList.contains('connected')).toBe(false);
     });
   });
 
@@ -332,13 +346,13 @@ describe('FloatingButton', () => {
       expect(getButton().innerHTML).toBe(domNormalize(chatIcon));
     });
 
-    it('CONNECTED + panel hidden: sets aria-label to "Open chat"', () => {
+    it('CONNECTED + panel hidden: sets aria-label to "Show chat"', () => {
       fb.render(makeState({
         inputMode: 'text',
         connection: ConnectionState.CONNECTED,
         panelVisible: false,
       }));
-      expect(getButton().getAttribute('aria-label')).toBe('Open chat');
+      expect(getButton().getAttribute('aria-label')).toBe('Show chat');
     });
 
     it('CONNECTED + panel visible: shows close icon', () => {
@@ -350,21 +364,22 @@ describe('FloatingButton', () => {
       expect(getButton().innerHTML).toBe(domNormalize(closeIcon));
     });
 
-    it('CONNECTED + panel visible: sets aria-label to "Close chat"', () => {
+    it('CONNECTED + panel visible: sets aria-label to "Hide chat"', () => {
       fb.render(makeState({
         inputMode: 'text',
         connection: ConnectionState.CONNECTED,
         panelVisible: true,
       }));
-      expect(getButton().getAttribute('aria-label')).toBe('Close chat');
+      expect(getButton().getAttribute('aria-label')).toBe('Hide chat');
     });
 
-    it('CONNECTED: adds listening class', () => {
+    it('CONNECTED: adds connected class (not listening)', () => {
       fb.render(makeState({
         inputMode: 'text',
         connection: ConnectionState.CONNECTED,
       }));
-      expect(getButton().classList.contains('listening')).toBe(true);
+      expect(getButton().classList.contains('connected')).toBe(true);
+      expect(getButton().classList.contains('listening')).toBe(false);
     });
   });
 
@@ -379,7 +394,7 @@ describe('FloatingButton', () => {
         speechPaused: false,
         panelVisible: true,
       }));
-      expect(getButton().innerHTML).toBe(domNormalize(micOffIcon));
+      expect(getButton().innerHTML).toBe(domNormalize(micActiveIcon));
       expect(getButton().classList.contains('listening')).toBe(true);
 
       fb.render(makeState({
@@ -407,7 +422,7 @@ describe('FloatingButton', () => {
         speechActive: true,
         panelVisible: true,
       }));
-      expect(getButton().innerHTML).toBe(domNormalize(micOffIcon));
+      expect(getButton().innerHTML).toBe(domNormalize(micActiveIcon));
       expect(getButton().classList.contains('connecting')).toBe(false);
       expect(getButton().classList.contains('listening')).toBe(true);
     });
@@ -494,6 +509,7 @@ describe('FloatingButton', () => {
       expect(getButton().classList.contains('connecting')).toBe(true);
       expect(getButton().classList.contains('listening')).toBe(false);
       expect(getButton().classList.contains('paused')).toBe(false);
+      expect(getButton().classList.contains('connected')).toBe(false);
 
       fb.render(makeState({
         inputMode: 'voice',
@@ -504,6 +520,16 @@ describe('FloatingButton', () => {
       expect(getButton().classList.contains('connecting')).toBe(false);
       expect(getButton().classList.contains('listening')).toBe(false);
       expect(getButton().classList.contains('paused')).toBe(true);
+      expect(getButton().classList.contains('connected')).toBe(false);
+
+      fb.render(makeState({
+        inputMode: 'text',
+        connection: ConnectionState.CONNECTED,
+      }));
+      expect(getButton().classList.contains('connecting')).toBe(false);
+      expect(getButton().classList.contains('listening')).toBe(false);
+      expect(getButton().classList.contains('paused')).toBe(false);
+      expect(getButton().classList.contains('connected')).toBe(true);
     });
   });
 

@@ -4,7 +4,7 @@ import type { InputMode } from './FloatingButton';
 import { TranscriptStore } from './TranscriptStore';
 import type { StoredTranscriptLine } from './TranscriptStore';
 import {
-  sendIcon, minimizeIcon, endSessionIcon, settingsIcon, refreshIcon,
+  sendIcon, minimizeIcon, stopIcon, settingsIcon, refreshIcon,
   gearSmallIcon, checkSmallIcon, xSmallIcon, codeIcon,
 } from './icons';
 
@@ -98,7 +98,7 @@ export class TranscriptOverlay {
 
     this.endSessionBtn = document.createElement('button');
     this.endSessionBtn.className = 'vsdk-panel-end-session';
-    this.endSessionBtn.innerHTML = endSessionIcon;
+    this.endSessionBtn.innerHTML = stopIcon;
     this.endSessionBtn.setAttribute('aria-label', 'End session');
     this.endSessionBtn.addEventListener('click', () => {
       this.onDisconnect?.();
