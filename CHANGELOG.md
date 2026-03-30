@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/billiax/voxglide/compare/v1.1.0...v1.1.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* skip auto-reconnect on page reload and simplify toggle behavior ([d609278](https://github.com/billiax/voxglide/commit/d60927880185be035a3663d1e273ac45c22b5f5a))
+
 # [1.1.0](https://github.com/billiax/voxglide/compare/v1.0.1...v1.1.0) (2026-03-25)
 
 
