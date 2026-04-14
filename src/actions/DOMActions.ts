@@ -9,10 +9,31 @@ import { scoreText, getNearbyLabelText, dispatchClickSequence } from './dom-util
 type FieldElement = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 type EditableElement = FieldElement | HTMLElement;
 
-// ── Element caches ──
+// ── Element caches (bounded, with stale-entry cleanup) ──
 
+const MAX_CACHE_SIZE = 100;
 const fieldCache = new Map<string, HTMLElement>();
 const clickCache = new Map<string, HTMLElement>();
+
+/**
+ * Sweep a cache: remove entries where the element is no longer in the DOM.
+ * Called before inserting to keep caches lean.
+ */
+function sweepStaleEntries(cache: Map<string, HTMLElement>): void {
+  for (const [key, el] of cache) {
+    if (!el.isConnected) cache.delete(key);
+  }
+}
+
+/**
+ * Enforce max cache size by evicting the oldest entry (first inserted).
+ */
+function enforceMaxSize(cache: Map<string, HTMLElement>): void {
+  if (cache.size > MAX_CACHE_SIZE) {
+    const firstKey = cache.keys().next().value!;
+    cache.delete(firstKey);
+  }
+}
 
 function getCachedField(fieldId: string): EditableElement | null {
   const cached = fieldCache.get(fieldId);
@@ -115,7 +136,9 @@ function resolveField(fieldId: string): EditableElement | null {
 }
 
 function cacheField(fieldId: string, el: EditableElement): EditableElement {
+  sweepStaleEntries(fieldCache);
   fieldCache.set(fieldId, el);
+  enforceMaxSize(fieldCache);
   return el;
 }
 
@@ -358,7 +381,9 @@ function resolveClickTarget(description: string, selector?: string): HTMLElement
 }
 
 function cacheClick(key: string, el: HTMLElement): HTMLElement {
+  sweepStaleEntries(clickCache);
   clickCache.set(key, el);
+  enforceMaxSize(clickCache);
   return el;
 }
 
