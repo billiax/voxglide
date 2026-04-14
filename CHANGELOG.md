@@ -1,3 +1,13 @@
+## [1.1.2](https://github.com/billiax/voxglide/compare/v1.1.1...v1.1.2) (2026-04-14)
+
+
+### Bug Fixes
+
+* add 5s timeout for html2canvas script loading ([63ccdc9](https://github.com/billiax/voxglide/commit/63ccdc919dbb0d4df0448c3f75ec440bbc3023a7))
+* bound DOMActions element caches and sweep stale entries ([864df17](https://github.com/billiax/voxglide/commit/864df17c8f9353a3b11094d009e2d2d5ad6a1710))
+* filter non-meaningful DOM mutations in PageContextProvider ([811fe8c](https://github.com/billiax/voxglide/commit/811fe8c8bbdb22db38232e501e1346b6a95e668d))
+* **server:** drop dangling functionCalls from history on abort and increase tool depth ([3ac2887](https://github.com/billiax/voxglide/commit/3ac28870ec8bfacd3443e6f7489686756a3736f5))
+
 ## [1.1.1](https://github.com/billiax/voxglide/compare/v1.1.0...v1.1.1) (2026-03-30)
 
 
