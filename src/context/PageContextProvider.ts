@@ -84,11 +84,26 @@ export class PageContextProvider implements ContextProvider {
     if (typeof MutationObserver === 'undefined') return;
 
     this.observer = new MutationObserver((mutations) => {
-      // Only mark dirty for meaningful changes (not attribute-only on our own UI)
-      const meaningful = mutations.some((m) =>
-        m.type === 'childList' ||
-        (m.type === 'attributes' && m.attributeName !== null && PageContextProvider.MEANINGFUL_ATTRIBUTES.has(m.attributeName))
-      );
+      const meaningful = mutations.some((m) => {
+        if (m.type === 'attributes') {
+          return m.attributeName !== null && PageContextProvider.MEANINGFUL_ATTRIBUTES.has(m.attributeName);
+        }
+        // childList: skip if all added/removed nodes are non-meaningful
+        // (script, style, link, meta, SDK host, text nodes, comments)
+        if (m.type === 'childList') {
+          const allNodes = [...m.addedNodes, ...m.removedNodes];
+          if (allNodes.length === 0) return false;
+          return allNodes.some((node) => {
+            if (node.nodeType !== Node.ELEMENT_NODE) return false;
+            const el = node as Element;
+            const tag = el.tagName;
+            if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK' || tag === 'META') return false;
+            if (el.hasAttribute('data-voice-sdk')) return false;
+            return true;
+          });
+        }
+        return false;
+      });
       if (meaningful) {
         this.dirty = true;
         this.debouncedFingerprintCheck();

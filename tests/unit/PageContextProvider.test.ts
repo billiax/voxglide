@@ -356,9 +356,10 @@ describe('PageContextProvider', () => {
       // Modify the DOM
       document.body.innerHTML = `<h1>Updated</h1>`;
 
-      // Trigger the observer callback with a childList mutation
+      // Trigger the observer callback with a childList mutation containing a meaningful element
+      const div = document.createElement('div');
       observer.callback(
-        [{ type: 'childList', attributeName: null }] as unknown as MutationRecord[],
+        [{ type: 'childList', attributeName: null, addedNodes: [div], removedNodes: [] }] as unknown as MutationRecord[],
         observer as unknown as MutationObserver,
       );
 
