@@ -166,6 +166,8 @@ vi.mock('../../src/actions/NbtFunctionsProvider', () => {
     getActions = vi.fn().mockReturnValue({});
     getToolDeclarations = vi.fn().mockReturnValue([]);
     getRegisteredNames = vi.fn().mockReturnValue(new Set());
+    startPolling = vi.fn();
+    stopPolling = vi.fn();
     constructor(public onChange: any, public debug: any) {}
   }
   return { NbtFunctionsProvider: MockNbtFunctionsProvider };

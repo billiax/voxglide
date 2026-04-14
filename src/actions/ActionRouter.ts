@@ -1,7 +1,5 @@
 import type { FunctionCall, CustomAction } from '../types';
 import { fillField, clickElement, readContent } from './DOMActions';
-import { NavigationHandler } from './NavigationHandler';
-import type { VoiceSDKConfig } from '../types';
 
 type ActionHandler = (args: Record<string, unknown>) => Promise<{ result: string }>;
 
@@ -12,22 +10,12 @@ type ActionHandler = (args: Record<string, unknown>) => Promise<{ result: string
  */
 export class ActionRouter {
   private handlers = new Map<string, ActionHandler>();
-  private navigationHandler: NavigationHandler;
 
-  constructor(config: VoiceSDKConfig) {
-    this.navigationHandler = new NavigationHandler(config);
-
+  constructor() {
     // Register built-in DOM action handlers
     this.handlers.set('fillField', fillField);
     this.handlers.set('clickElement', clickElement);
     this.handlers.set('readContent', readContent);
-  }
-
-  /**
-   * Pass the server-assigned sessionId to the navigation handler for reconnect persistence.
-   */
-  setNavigationSessionId(sessionId: string): void {
-    this.navigationHandler.setSessionId(sessionId);
   }
 
   registerHandler(toolName: string, handler: ActionHandler): void {

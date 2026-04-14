@@ -1,78 +1,11 @@
 import { SESSION_STORAGE_KEY } from '../constants';
-import type { SessionState, VoiceSDKConfig } from '../types';
-import { invalidateElementCache } from './DOMActions';
+import type { SessionState } from '../types';
 
 /**
- * Handles page navigation with session persistence.
- * Before navigating, saves SDK state to sessionStorage so it can auto-reconnect on the new page.
+ * Static utility for session persistence across page navigations.
+ * Manages sessionStorage state for auto-reconnect after navigation.
  */
 export class NavigationHandler {
-  private config: VoiceSDKConfig;
-  private allowCrossOrigin: boolean;
-  private sessionId: string | null = null;
-
-  constructor(config: VoiceSDKConfig) {
-    this.config = config;
-    this.allowCrossOrigin = config.actions?.allowCrossOrigin ?? false;
-  }
-
-  setSessionId(id: string): void {
-    this.sessionId = id;
-  }
-
-  async navigateTo(args: Record<string, unknown>): Promise<{ result: string }> {
-    const url = String(args.url || '');
-    if (!url) return { result: JSON.stringify({ error: 'No URL provided' }) };
-
-    // Resolve relative URLs
-    let resolved: URL;
-    try {
-      resolved = new URL(url, window.location.href);
-    } catch {
-      return { result: JSON.stringify({ error: `Invalid URL: "${url}"` }) };
-    }
-
-    // Same-origin check
-    if (!this.allowCrossOrigin && resolved.origin !== window.location.origin) {
-      return { result: JSON.stringify({ error: `Cross-origin navigation not allowed: "${resolved.href}"` }) };
-    }
-
-    // Save session state for auto-reconnect on the new page
-    if (this.config.autoReconnect !== false) {
-      this.saveSessionState();
-    }
-
-    // Invalidate element caches before navigation
-    invalidateElementCache();
-
-    // Navigate
-    window.location.href = resolved.href;
-
-    return { result: JSON.stringify({ success: true, navigatedTo: resolved.href }) };
-  }
-
-  /**
-   * Save enough state to sessionStorage to reconnect after a page refresh.
-   */
-  private saveSessionState(): void {
-    const state: SessionState = {
-      config: {
-        ...this.config,
-        // Don't persist handler functions
-        actions: this.config.actions ? {
-          allowCrossOrigin: this.config.actions.allowCrossOrigin,
-        } : undefined,
-      },
-      sessionId: this.sessionId || undefined,
-    };
-
-    try {
-      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // sessionStorage may be full or disabled
-    }
-  }
-
   /**
    * Check if there's a pending reconnect from a previous navigation.
    * Does NOT remove the stored state — call consumePendingReconnect() after successful reconnect.

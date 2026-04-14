@@ -372,11 +372,22 @@ describe('NbtFunctionsProvider', () => {
   });
 
   describe('destroy()', () => {
-    it('cleans up interval', () => {
+    it('cleans up interval when polling is active', () => {
+      vi.useFakeTimers();
       const p = makeProvider();
+      p.startPolling();
       const clearSpy = vi.spyOn(global, 'clearInterval');
       p.destroy();
       expect(clearSpy).toHaveBeenCalled();
+      clearSpy.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it('does not call clearInterval when polling was never started', () => {
+      const p = makeProvider();
+      const clearSpy = vi.spyOn(global, 'clearInterval');
+      p.destroy();
+      expect(clearSpy).not.toHaveBeenCalled();
       clearSpy.mockRestore();
     });
 
@@ -398,6 +409,77 @@ describe('NbtFunctionsProvider', () => {
       };
       window.dispatchEvent(new CustomEvent('voxglide:functions-changed'));
       expect(onChange).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('startPolling() and stopPolling()', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('startPolling starts the interval and sync is called on tick', () => {
+      const p = makeProvider();
+      onChange.mockClear();
+
+      window.nbt_functions = {
+        delayed: { description: 'Delayed', handler: () => 'ok' },
+      };
+
+      // Before startPolling, advancing timers should not trigger sync
+      vi.advanceTimersByTime(3000);
+      expect(onChange).not.toHaveBeenCalled();
+
+      // After startPolling, advancing timers should trigger sync
+      p.startPolling();
+      vi.advanceTimersByTime(2000);
+      expect(onChange).toHaveBeenCalledWith(['delayed'], []);
+    });
+
+    it('stopPolling stops the interval', () => {
+      const p = makeProvider();
+      p.startPolling();
+      p.stopPolling();
+      onChange.mockClear();
+
+      window.nbt_functions = {
+        afterStop: { description: 'After stop', handler: () => 'ok' },
+      };
+      vi.advanceTimersByTime(5000);
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('startPolling is idempotent (calling twice does not create two intervals)', () => {
+      const p = makeProvider();
+      const setIntervalSpy = vi.spyOn(global, 'setInterval');
+
+      p.startPolling();
+      const callCount1 = setIntervalSpy.mock.calls.length;
+
+      p.startPolling();
+      const callCount2 = setIntervalSpy.mock.calls.length;
+
+      expect(callCount2).toBe(callCount1);
+      setIntervalSpy.mockRestore();
+    });
+
+    it('stopPolling is safe to call when not polling', () => {
+      const p = makeProvider();
+      // Should not throw
+      expect(() => p.stopPolling()).not.toThrow();
+    });
+
+    it('polling does not run automatically after construction', () => {
+      const setIntervalSpy = vi.spyOn(global, 'setInterval');
+      const callsBefore = setIntervalSpy.mock.calls.length;
+      makeProvider();
+      const callsAfter = setIntervalSpy.mock.calls.length;
+
+      expect(callsAfter).toBe(callsBefore);
+      setIntervalSpy.mockRestore();
     });
   });
 

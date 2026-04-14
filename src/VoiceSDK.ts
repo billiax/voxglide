@@ -135,7 +135,7 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
     });
 
     // Set up action router
-    this.actionRouter = new ActionRouter(config);
+    this.actionRouter = new ActionRouter();
 
     // Register scanPage handler
     this.actionRouter.registerHandler('scanPage', async () => {
@@ -434,15 +434,13 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           if (status === 'connected') {
             this.setConnectionState(ConnectionState.CONNECTED);
             this.emit('connected');
+            // Start nbt_functions polling now that session is active
+            this.nbtFunctionsProvider?.startPolling();
             // Disable auto-hide during active session — user controls visibility
             // via the minimize button. Re-enabled on disconnect.
             this.ui?.setAutoHideEnabled(false);
             // Show transcript panel immediately so user can see input + type
             this.ui?.showTranscript();
-            // Store sessionId for navigation handler
-            if (this.session?.sessionId) {
-              this.actionRouter.setNavigationSessionId(this.session.sessionId);
-            }
             // Clear pending reconnect now that we've successfully connected
             NavigationHandler.consumePendingReconnect();
             // Send structured scan data to server for admin visualization
@@ -450,6 +448,8 @@ export class VoiceSDK extends EventEmitter<VoiceSDKEvents> {
           } else if (status === 'disconnected') {
             // Ignore stale disconnect if already disconnected (e.g. from old WS onclose)
             if (this.connectionState === ConnectionState.DISCONNECTED) return;
+            // Stop nbt_functions polling when session is inactive
+            this.nbtFunctionsProvider?.stopPolling();
             // Re-enable auto-hide so transcript fades out naturally
             this.ui?.setAutoHideEnabled(true);
             this.setConnectionState(ConnectionState.DISCONNECTED);

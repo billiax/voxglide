@@ -1,22 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ActionRouter } from '../../src/actions/ActionRouter';
 
-// Mock the NavigationHandler so ActionRouter can construct without real DOM/sessionStorage
-vi.mock('../../src/actions/NavigationHandler', () => {
-  return {
-    NavigationHandler: class MockNavigationHandler {
-      navigateTo = vi.fn().mockResolvedValue({ result: JSON.stringify({ success: true }) });
-    },
-  };
-});
-
-const mockConfig = { serverUrl: 'ws://localhost:3100' } as any;
-
 describe('ActionRouter', () => {
   let router: ActionRouter;
 
   beforeEach(() => {
-    router = new ActionRouter(mockConfig);
+    router = new ActionRouter();
   });
 
   describe('constructor', () => {
@@ -41,11 +30,6 @@ describe('ActionRouter', () => {
       expect(parsed.content).toBe('Hello');
     });
 
-    it('navigateTo is no longer a built-in handler', async () => {
-      const result = await router.route({ id: '4', name: 'navigateTo', args: { url: '/page' } });
-      const parsed = JSON.parse(result.result);
-      expect(parsed.error).toContain('Unknown action');
-    });
   });
 
   describe('route()', () => {

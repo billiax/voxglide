@@ -18,15 +18,32 @@ export class NbtFunctionsProvider {
     this.onChange = onChange;
     this.debug = debug ?? false;
 
-    // Initial discovery
+    // Initial one-time discovery (no polling until startPolling is called)
     this.sync();
 
-    // Poll every 2 seconds (lightweight fingerprint check)
-    this.pollInterval = setInterval(() => this.sync(), 2000);
-
-    // Listen for instant notification
+    // Listen for instant notification (always active — lightweight)
     this.eventHandler = () => this.sync();
     window.addEventListener('voxglide:functions-changed', this.eventHandler);
+  }
+
+  /**
+   * Start the 2-second poll interval. Call when a session becomes active.
+   * Safe to call multiple times (no-op if already polling).
+   */
+  startPolling(): void {
+    if (this.pollInterval) return;
+    this.pollInterval = setInterval(() => this.sync(), 2000);
+  }
+
+  /**
+   * Stop the poll interval. Call when a session disconnects.
+   * Safe to call multiple times.
+   */
+  stopPolling(): void {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
   }
 
   /**

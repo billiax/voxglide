@@ -72,6 +72,8 @@ vi.mock('../../src/actions/NbtFunctionsProvider', () => {
     getActions = vi.fn().mockReturnValue({});
     getToolDeclarations = vi.fn().mockReturnValue([]);
     getRegisteredNames = vi.fn().mockReturnValue(new Set());
+    startPolling = vi.fn();
+    stopPolling = vi.fn();
     constructor(public onChange: any, public debug: any) {}
   }
   return { NbtFunctionsProvider: MockNbtFunctionsProvider };
@@ -1177,7 +1179,7 @@ describe('Integration: ActionRouter with Real DOMActions', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     invalidateElementCache();
-    router = new ActionRouter({ serverUrl: 'ws://localhost:3100' } as any);
+    router = new ActionRouter();
   });
 
   it('routes fillField to real DOMActions which modifies the DOM', async () => {
