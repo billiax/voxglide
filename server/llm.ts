@@ -122,16 +122,20 @@ export async function handleTurnStreaming(
     for await (const chunk of stream) {
       // Check abort signal
       if (signal.aborted) {
-        if (allParts.length > 0) {
-          tracked.session?.history.push({ role: 'model', parts: allParts });
+        // Only save text parts on abort — dangling functionCalls without
+        // functionResponses violate Gemini constraints and confuse the LLM.
+        const textOnlyParts = allParts.filter((p: any) => !p.functionCall);
+        if (textOnlyParts.length > 0) {
+          tracked.session?.history.push({ role: 'model', parts: textOnlyParts });
         }
         return;
       }
 
       // Check client still connected — always use tracked.clientWs for current reference
       if (!tracked.clientWs || tracked.clientWs.readyState !== WebSocket.OPEN) {
-        if (allParts.length > 0) {
-          tracked.session?.history.push({ role: 'model', parts: allParts });
+        const textOnlyParts = allParts.filter((p: any) => !p.functionCall);
+        if (textOnlyParts.length > 0) {
+          tracked.session?.history.push({ role: 'model', parts: textOnlyParts });
         }
         return;
       }
@@ -162,9 +166,10 @@ export async function handleTurnStreaming(
       }
     }
   } catch (err: any) {
-    // Save partial history on stream error
-    if (allParts.length > 0) {
-      tracked.session?.history.push({ role: 'model', parts: allParts });
+    // Save text-only parts on stream error — drop dangling functionCalls
+    const textOnlyParts = allParts.filter((p: any) => !p.functionCall);
+    if (textOnlyParts.length > 0) {
+      tracked.session?.history.push({ role: 'model', parts: textOnlyParts });
     }
     throw err;
   }
