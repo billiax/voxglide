@@ -37,14 +37,31 @@ export async function captureScreenshot(opts?: ScreenshotOptions): Promise<strin
   }
 }
 
+const SCRIPT_LOAD_TIMEOUT_MS = 5000;
+
 async function loadHtml2Canvas(): Promise<any> {
   if ((window as any).html2canvas) return (window as any).html2canvas;
 
   return new Promise((resolve) => {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-    script.onload = () => resolve((window as any).html2canvas);
-    script.onerror = () => resolve(null);
+
+    let settled = false;
+    const settle = (value: any) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+
+    const timer = setTimeout(() => {
+      settle(null);
+      // Remove the script tag if it never loaded — prevent orphaned element
+      script.remove();
+    }, SCRIPT_LOAD_TIMEOUT_MS);
+
+    script.onload = () => settle((window as any).html2canvas);
+    script.onerror = () => settle(null);
     document.head.appendChild(script);
   });
 }
