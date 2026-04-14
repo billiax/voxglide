@@ -149,27 +149,7 @@ describe('UIManager', () => {
       ui.destroy();
     });
 
-    it('removes existing SDK hosts on construction (singleton pattern)', () => {
-      // Create a first instance
-      const ui1 = new UIManager({}, onToggle);
-      const host1 = ui1.getHost();
-      expect(host1.isConnected).toBe(true);
-
-      // Destroy ui1 first to clean up its observers/intervals
-      ui1.destroy();
-
-      // Manually re-attach the host to simulate a stale element in the DOM
-      host1.setAttribute('data-voice-sdk', 'true');
-      document.body.appendChild(host1);
-      expect(document.querySelectorAll('div[data-voice-sdk]').length).toBe(1);
-
-      // Creating a second instance should remove the stale host
-      const ui2 = new UIManager({}, onToggle);
-      expect(host1.isConnected).toBe(false);
-      expect(document.querySelectorAll('div[data-voice-sdk]').length).toBe(1);
-
-      ui2.destroy();
-    });
+    // Singleton host cleanup is now handled by VoiceSDK constructor, not UIManager.
 
     it('wires onSendText handler to transcript when provided', () => {
       const ui = new UIManager({}, onToggle, onSendText);

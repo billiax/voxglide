@@ -42,10 +42,6 @@ export class UIManager {
     this.config = { ...DEFAULT_UI, ...config };
     this.inputMode = inputMode;
 
-    // Singleton: remove ALL existing SDK host elements ("last writer wins").
-    // querySelectorAll ensures every stale host is cleaned up, not just the first.
-    document.querySelectorAll('div[data-voice-sdk]').forEach((el) => el.remove());
-
     // Create state machine
     this.stateMachine = new UIStateMachine(inputMode);
 
